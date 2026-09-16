@@ -1,4 +1,4 @@
-import os, logging, time, re, subprocess
+import os, logging, time, re, subprocess, asyncio
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, HTMLResponse
@@ -94,12 +94,17 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
     try:
         logger.info(f"Starting {jid}")
         jobs[jid]["status"] = "processing"
-        jobs[jid]["progress"] = 10
+        jobs[jid]["progress"] = 5
+        logger.info(f"Job {jid}: Progress 5% - Starting extraction")
+        
         segments = extract_segments(path)
         if not segments:
             raise ValueError("No text found")
+        
         logger.info(f"Found {len(segments)} segments")
-        jobs[jid]["progress"] = 30
+        jobs[jid]["progress"] = 20
+        logger.info(f"Job {jid}: Progress 20% - Extraction complete")
+        
         audio_files = []
         if polly:
             for idx, seg in enumerate(segments):
@@ -111,17 +116,31 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                     audio_path = OUTPUT_DIR / f"{jid}_seg_{idx}.mp3"
                     audio_path.write_bytes(response["AudioStream"].read())
                     audio_files.append(audio_path)
-                    jobs[jid]["progress"] = min(30 + int((idx / len(segments)) * 60), 90)
+                    
+                    # Calculate progress (20-85%)
+                    progress = 20 + int((idx / len(segments)) * 65)
+                    jobs[jid]["progress"] = progress
+                    logger.info(f"Job {jid}: Progress {progress}% - Synthesized segment {idx + 1}/{len(segments)}")
+                    
+                    # Small delay to allow frontend to poll
+                    await asyncio.sleep(0.1)
                 except Exception as e:
                     logger.error(f"Segment error: {e}")
                     continue
-            jobs[jid]["progress"] = 90
+            
+            jobs[jid]["progress"] = 85
+            logger.info(f"Job {jid}: Progress 85% - All segments synthesized")
+            
             if audio_files:
                 try:
                     concat_file = OUTPUT_DIR / f"{jid}_concat.txt"
                     with open(concat_file, "w") as f:
                         for af in audio_files:
                             f.write(f"file '{af}'\n")
+                    
+                    jobs[jid]["progress"] = 90
+                    logger.info(f"Job {jid}: Progress 90% - Concatenating audio")
+                    
                     output_path = OUTPUT_DIR / f"{jid}.mp3"
                     subprocess.run(["ffmpeg", "-f", "concat", "-safe", "0", "-i", str(concat_file), "-c", "copy", str(output_path), "-y"], capture_output=True, timeout=300, check=True)
                     concat_file.unlink(missing_ok=True)
@@ -133,8 +152,10 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                         audio_files[0].rename(OUTPUT_DIR / f"{jid}.mp3")
                         for af in audio_files[1:]:
                             af.unlink(missing_ok=True)
+        
         jobs[jid]["status"] = "completed"
         jobs[jid]["progress"] = 100
+        logger.info(f"Job {jid}: Progress 100% - Completed")
     except Exception as e:
         logger.error(f"Error: {e}")
         jobs[jid]["status"] = "failed"
