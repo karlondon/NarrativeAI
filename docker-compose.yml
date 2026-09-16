@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  narrativeai:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./output:/app/output
+    environment:
+      - AWS_REGION=us-east-1
+      - PORT=8000
+      - ENV=development
+    env_file:
+      - .env
+    restart: unless-stopped
