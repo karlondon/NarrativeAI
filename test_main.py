@@ -10,13 +10,13 @@ def test_health():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
-    assert data["version"] == "0.1.0"
+    assert data["version"] == "0.2.0"
 
 def test_root():
-    """Test root endpoint"""
+    """Test root endpoint - returns HTML UI"""
     response = client.get("/")
     assert response.status_code == 200
-    assert "NarrativeAI" in response.json()["name"]
+    assert "NarrativeAI" in response.text
 
 def test_upload_pdf_missing():
     """Test upload with no file"""

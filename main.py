@@ -49,7 +49,7 @@ async def health():
 @app.get("/", response_class=HTMLResponse)
 async def root():
     """Serve beautiful web UI for uploads and downloads"""
-    return get_html_interface()
+    return get_html_ui()
 
 @app.post("/upload")
 async def upload(file: UploadFile = File(...), multi_voice: bool = True, bg: BackgroundTasks = None):
