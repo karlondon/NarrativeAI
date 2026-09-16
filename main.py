@@ -50,7 +50,7 @@ async def root():
     return get_html_ui()
 
 @app.post("/upload")
-async def upload(file: UploadFile = File(...), multi_voice: bool = True, bg: BackgroundTasks):
+async def upload(bg: BackgroundTasks, file: UploadFile = File(...), multi_voice: bool = True):
     if not file.filename.endswith('.pdf'):
         raise HTTPException(400, "Only PDF files are supported")
     content = await file.read()
