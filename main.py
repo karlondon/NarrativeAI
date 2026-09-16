@@ -50,7 +50,7 @@ async def root():
     return get_html_ui()
 
 @app.post("/upload")
-async def upload(file: UploadFile = File(...), multi_voice: bool = True, bg: BackgroundTasks = None):
+async def upload(file: UploadFile = File(...), multi_voice: bool = True, bg: BackgroundTasks):
     if not file.filename.endswith('.pdf'):
         raise HTTPException(400, "Only PDF files are supported")
     content = await file.read()
@@ -59,8 +59,8 @@ async def upload(file: UploadFile = File(...), multi_voice: bool = True, bg: Bac
     jid = f"job_{int(time.time())}_{file.filename.replace('.pdf','')}"
     (UPLOAD_DIR / f"{jid}.pdf").write_bytes(content)
     jobs[jid] = {"id": jid, "status": "pending", "file": file.filename, "progress": 0, "multi_voice": multi_voice}
-    if bg:
-        bg.add_task(process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice)
+    bg.add_task(process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice)
+    logger.info(f"✅ Job {jid} queued for PDF processing")
     return {"job_id": jid, "status": "pending"}
 
 @app.get("/jobs/{jid}")
