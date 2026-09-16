@@ -106,3 +106,4 @@ NarrativeAI/
 │       └── deploy.yml      # GitHub Actions CI/CD
 └── README.md               # Documentation
 ```
+# Deployment with proper AWS credentials
