@@ -118,9 +118,16 @@ async def status(jid: str):
 @app.get("/jobs/{jid}/download")
 async def download(jid: str):
     if jid not in jobs or jobs[jid]['status'] != 'completed':
-        raise HTTPException(400, "not ready")
+        raise HTTPException(400, "Job not ready or not found")
+    
     f = OUTPUT_DIR / f"{jid}.mp3"
-    return FileResponse(f, filename=f"{jobs[jid]['file'].replace('.pdf','')}.mp3", media_type="audio/mpeg") if f.exists() else None
+    if not f.exists():
+        logger.error(f"❌ Download: Audio file not found: {f}")
+        raise HTTPException(404, f"Audio file not found for job {jid}")
+    
+    filename = f"{jobs[jid]['file'].replace('.pdf','')}.mp3"
+    logger.info(f"✅ Download: Sending {filename} ({f.stat().st_size / 1024 / 1024:.1f}MB)")
+    return FileResponse(f, filename=filename, media_type="audio/mpeg")
 
 def detect_speaker(text: str, segment_index: int = 0) -> tuple:
     """
