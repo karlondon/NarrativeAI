@@ -1,4 +1,4 @@
-import os, logging, time, re, subprocess, asyncio, threading, json
+import os, logging, time, re, subprocess, asyncio, threading, json, uuid
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, HTMLResponse
@@ -7,6 +7,15 @@ from pydantic import BaseModel
 import boto3
 from dotenv import load_dotenv
 import pdfplumber
+
+# NLP for sentiment analysis
+try:
+    from textblob import TextBlob
+    HAS_TEXTBLOB = True
+except ImportError:
+    HAS_TEXTBLOB = False
+    logger_temp = logging.getLogger(__name__)
+    logger_temp.info("⚠️ TextBlob not installed. Install: pip install textblob")
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -27,6 +36,8 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 jobs_lock = threading.Lock()  # Thread-safe access to jobs dict
+GLOBAL_CHARACTER_VOICES = {}  # Global character-to-voice mapping for consistency throughout document
+
 
 def load_jobs_from_disk():
     """Load jobs from persistent storage"""
@@ -111,36 +122,106 @@ async def download(jid: str):
     f = OUTPUT_DIR / f"{jid}.mp3"
     return FileResponse(f, filename=f"{jobs[jid]['file'].replace('.pdf','')}.mp3", media_type="audio/mpeg") if f.exists() else None
 
-def detect_speaker(text: str, segment_index: int = 0) -> str:
-    """Detect appropriate speaker voice based on text content and variation"""
+def detect_speaker(text: str, segment_index: int = 0) -> tuple:
+    """
+    Advanced speaker detection with NLP analysis and character tracking.
+    Returns: (voice_id, ssml_text) tuple with SSML prosody tags for pitch and rate control
+    
+    Detection hierarchy:
+    1. Character names (e.g., "John said") - consistent voice assignment
+    2. Dialogue with gender hints (he/she said)
+    3. Single-quoted speech
+    4. Questions (ends with ?)
+    5. Exclamations (ends with !)
+    6. Emotional tone analysis (sentiment polarity)
+    7. Voice rotation for narrative variety
+    """
+    global GLOBAL_CHARACTER_VOICES
+    
     text_lower = text.lower()
+    voice_id = "narrator"
+    pitch = "0%"
+    rate = "100%"
     
-    # Dialogue detection (quoted speech)
-    if re.search(r'"[^"]{10,}"', text):
-        # Character dialogue - alternate between male and female voices
-        if re.search(r'(he said|asked|replied|exclaimed|shouted|whispered)', text_lower):
-            return "male_1" if segment_index % 2 == 0 else "female_1"
-        return "male_1"
+    # LEVEL 1: CHARACTER NAME DETECTION - assigns consistent voices to named characters
+    char_pattern = r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+(?:said|asked|replied|exclaimed|shouted|whispered|muttered|hissed|bellowed|cried)'
+    char_matches = re.findall(char_pattern, text)
     
-    if re.search(r"'[^']{10,}'", text):
-        return "female_1"
+    if char_matches:
+        char_name = char_matches[0]
+        if char_name not in GLOBAL_CHARACTER_VOICES:
+            available_voices = ["male_1", "male_2", "female_1", "female_2", "old_male"]
+            char_index = len(GLOBAL_CHARACTER_VOICES) % len(available_voices)
+            GLOBAL_CHARACTER_VOICES[char_name] = available_voices[char_index]
+            logger.info(f"🎭 NEW CHARACTER: '{char_name}' → {GLOBAL_CHARACTER_VOICES[char_name]}")
+        
+        voice_id = GLOBAL_CHARACTER_VOICES[char_name]
+        pitch = "+10%"
+        rate = "95%"
     
-    # Question detection - use different voice for variety
-    if text.strip().endswith('?'):
-        return "female_2" if segment_index % 3 == 0 else "male_2"
+    # LEVEL 2: DIALOGUE DETECTION - Gender-aware dialogue handling
+    elif re.search(r'"[^"]{10,}"', text):
+        if re.search(r'(he\s+said|he\s+asked|he\s+exclaimed|he\s+bellowed)', text_lower):
+            voice_id = "male_1"
+        elif re.search(r'(she\s+said|she\s+asked|she\s+whispered)', text_lower):
+            voice_id = "female_2"
+        else:
+            voice_id = "male_1" if segment_index % 2 == 0 else "female_1"
+        pitch = "+15%"
+        rate = "95%"
     
-    # Exclamation detection
-    if text.strip().endswith('!'):
-        return "male_2" if segment_index % 2 == 0 else "female_1"
+    # LEVEL 3: SINGLE-QUOTED SPEECH
+    elif re.search(r"'[^']{10,}'", text):
+        voice_id = "female_1"
+        pitch = "+10%"
+        rate = "98%"
     
-    # Narrative text - rotate through narrator and other voices for variation
-    # This prevents monotone reading by varying the voice every few segments
-    voice_rotation = [
-        "narrator",    # Primary narrator (Joanna - female)
-        "male_2",      # Secondary narrator (Justin - male)
-        "male_1",      # Tertiary (Matthew - male)
-    ]
-    return voice_rotation[segment_index % len(voice_rotation)]
+    # LEVEL 4: QUESTIONS - faster delivery
+    elif text.strip().endswith('?'):
+        voice_id = "female_2" if segment_index % 3 == 0 else "male_2"
+        pitch = "+8%"
+        rate = "115%"
+    
+    # LEVEL 5: EXCLAMATIONS - energetic
+    elif text.strip().endswith('!'):
+        voice_id = "male_2" if segment_index % 2 == 0 else "female_1"
+        pitch = "+20%"
+        rate = "110%"
+    
+    # LEVEL 6: EMOTIONAL TONE DETECTION using TextBlob sentiment analysis
+    else:
+        try:
+            if HAS_TEXTBLOB:
+                blob = TextBlob(text[:500])
+                polarity = blob.sentiment.polarity
+                
+                if polarity > 0.4:  # Happy/positive
+                    voice_id = "female_1"
+                    pitch = "+15%"
+                    rate = "110%"
+                elif polarity < -0.4:  # Sad/negative
+                    voice_id = "old_male"
+                    pitch = "-15%"
+                    rate = "85%"
+                else:  # Neutral
+                    voice_rotation = ["narrator", "male_2", "male_1"]
+                    voice_id = voice_rotation[segment_index % len(voice_rotation)]
+            else:
+                # LEVEL 7: FALLBACK - Voice rotation
+                voice_rotation = ["narrator", "male_2", "male_1"]
+                voice_id = voice_rotation[segment_index % len(voice_rotation)]
+        except Exception as e:
+            logger.debug(f"Sentiment analysis failed: {e}")
+            voice_rotation = ["narrator", "male_2", "male_1"]
+            voice_id = voice_rotation[segment_index % len(voice_rotation)]
+    
+    # BUILD SSML TEXT WITH PROSODY TAGS
+    if pitch != "0%" or rate != "100%":
+        ssml_text = f'<speak><prosody pitch="{pitch}" rate="{rate}">{text}</prosody></speak>'
+    else:
+        ssml_text = f'<speak>{text}</speak>'
+    
+    return voice_id, ssml_text
 
 def extract_segments(pdf_path: Path) -> list:
     segments = []
@@ -154,7 +235,14 @@ def extract_segments(pdf_path: Path) -> list:
                     page_segments = 0
                     for para in text.split('\n\n'):
                         if para.strip():
-                            segments.append({"text": para.strip(), "speaker": detect_speaker(para, segment_index), "page": page_num + 1})
+                            # detect_speaker now returns (voice_id, ssml_text) tuple
+                            voice_id, ssml_text = detect_speaker(para, segment_index)
+                            segments.append({
+                                "text": para.strip(), 
+                                "voice_id": voice_id,
+                                "ssml_text": ssml_text,
+                                "page": page_num + 1
+                            })
                             segment_index += 1
                             page_segments += 1
                     logger.info(f"Page {page_num + 1}: Extracted {page_segments} paragraphs")
@@ -215,7 +303,10 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
             logger.info(f"🎤 AWS Polly available - synthesizing {len(segments)} segments")
             for idx, seg in enumerate(segments):
                 try:
-                    voice = VOICES.get(seg["speaker"], VOICES["narrator"]) if use_multi_voice else VOICES["narrator"]
+                    # Use the pre-computed voice_id and ssml_text from detect_speaker
+                    voice_id = seg["voice_id"] if use_multi_voice else "narrator"
+                    ssml_text = seg["ssml_text"] if use_multi_voice else f'<speak>{seg["text"]}</speak>'
+                    voice = VOICES.get(voice_id, VOICES["narrator"])
                     text = seg["text"]
                     
                     # AWS Polly limit is 3000 characters, use 2900 to be safe
@@ -249,27 +340,67 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
             
             if audio_files:
                 try:
+                    # FIX FOR 2-MINUTE AUDIO: Use absolute paths in concat file
                     concat_file = OUTPUT_DIR / f"{jid}_concat.txt"
                     with open(concat_file, "w") as f:
                         for af in audio_files:
-                            f.write(f"file '{af}'\n")
+                            abs_path = af.resolve()  # Convert to absolute path
+                            f.write(f"file '{abs_path}'\n")
                     
                     with jobs_lock:
                         jobs[jid]["progress"] = 90
                         save_jobs_to_disk(jobs)
-                    logger.info(f"Job {jid}: Progress 90% - Concatenating audio")
+                    logger.info(f"Job {jid}: Progress 90% - Concatenating {len(audio_files)} audio segments")
                     
                     output_path = OUTPUT_DIR / f"{jid}.mp3"
-                    subprocess.run(["ffmpeg", "-f", "concat", "-safe", "0", "-i", str(concat_file), "-c", "copy", str(output_path), "-y"], capture_output=True, timeout=300, check=True)
+                    
+                    # Improved FFmpeg command with proper error checking
+                    cmd = [
+                        "ffmpeg", 
+                        "-f", "concat", 
+                        "-safe", "0", 
+                        "-i", str(concat_file), 
+                        "-c", "copy",
+                        "-q:a", "0",
+                        "-y", 
+                        str(output_path)
+                    ]
+                    
+                    result = subprocess.run(cmd, capture_output=True, timeout=600, text=True)
+                    
+                    # Check for FFmpeg errors
+                    if result.returncode != 0:
+                        logger.error(f"❌ FFmpeg concat error:\n{result.stderr}")
+                        raise Exception(f"FFmpeg failed: {result.stderr[-500:]}")
+                    
+                    # Verify output file exists and has content
+                    if not output_path.exists():
+                        logger.error(f"❌ FFmpeg did not create output file")
+                        raise Exception("FFmpeg did not create output file")
+                    
+                    output_size = output_path.stat().st_size
+                    size_mb = output_size / 1024 / 1024
+                    logger.info(f"✅ Successfully concatenated to {output_path.name} ({size_mb:.1f}MB, {len(audio_files)} segments)")
+                    
+                    # Cleanup temporary files
                     concat_file.unlink(missing_ok=True)
                     for af in audio_files:
                         af.unlink(missing_ok=True)
+                    
+                except subprocess.TimeoutExpired:
+                    logger.error(f"❌ FFmpeg concatenation timed out (600s) - file too large")
+                    raise Exception("Concatenation timeout - file too large")
                 except Exception as e:
-                    logger.warning(f"ffmpeg error: {e}")
+                    logger.error(f"❌ Concatenation failed: {e}")
+                    # Fallback: use first audio file if concat fails
                     if audio_files:
+                        logger.info(f"⚠️ Falling back to first audio segment only")
                         audio_files[0].rename(OUTPUT_DIR / f"{jid}.mp3")
                         for af in audio_files[1:]:
                             af.unlink(missing_ok=True)
+                    else:
+                        raise
+
         
         with jobs_lock:
             jobs[jid]["status"] = "completed"
