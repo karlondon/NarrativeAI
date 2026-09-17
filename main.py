@@ -50,79 +50,61 @@ def save_jobs_to_disk(jobs_data):
 jobs = load_jobs_from_disk()
 logger.info(f"Loaded {len(jobs)} jobs from disk")
 
-VOICES = {"narrator": "Joanna", "male_1": "Matthew", "male_2": "Justin",
-    "female_1": "Ivy", "female_2": "Salli", "old_male": "Gary", "child": "Kimberly"}
+VOICES = {
+    "narrator": "Joanna",           # Female narrator - warm, engaging
+    "male_1": "Matthew",            # Male voice - strong, authoritative
+    "male_2": "Justin",             # Male voice - younger, friendly
+    "female_1": "Ivy",              # Female voice - energetic, young
+    "female_2": "Salli",            # Female voice - mature, professional
+    "old_male": "Gary",             # Male voice - older, wise
+    "child": "Kimberly"             # High-pitched for children
+}
 
-class Health(BaseModel):
-    status: str
-    version: str
-    aws_ok: bool
-
-@app.get("/health", response_model=Health)
-async def health():
-    return Health(status="healthy", version="0.2.0", aws_ok=bool(os.getenv('AWS_ACCESS_KEY_ID')))
-
-@app.get("/", response_class=HTMLResponse)
-async def root():
-    ui_path = Path(__file__).parent / "ui.html"
-    return ui_path.read_text() if ui_path.exists() else get_html_ui()
-
-@app.post("/upload")
-async def upload(bg: BackgroundTasks, file: UploadFile = File(...), multi_voice: bool = True):
-    if not file.filename.endswith('.pdf'):
-        raise HTTPException(400, "Only PDF files are supported")
-    content = await file.read()
-    if len(content) > 50*1024*1024:
-        raise HTTPException(413, "File too large")
-    # Create job ID with just timestamp + random suffix (avoid filename issues)
-    import uuid
-    jid = f"job_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-    pdf_filename = file.filename.replace('.pdf', '')
-    (UPLOAD_DIR / f"{jid}.pdf").write_bytes(content)
-    with jobs_lock:
-        jobs[jid] = {"id": jid, "status": "pending", "file": file.filename, "filename": pdf_filename, "progress": 0}
-        save_jobs_to_disk(jobs)  # Persist to disk
-    logger.info(f"✅ Job {jid} created for file: {file.filename}")
-    bg.add_task(run_process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice)
-    return {"job_id": jid, "status": "pending"}
-
-@app.get("/jobs/{jid}")
-async def status(jid: str):
-    with jobs_lock:
-        job = jobs.get(jid)
-        if job:
-            logger.info(f"Status check for {jid}: {job}")
-            return job
-        else:
-            logger.info(f"Job not found: {jid}. Available jobs: {list(jobs.keys())}")
-            return {"error": "not found", "jid": jid, "available_jobs": list(jobs.keys())}
-
-@app.get("/jobs/{jid}/download")
-async def download(jid: str):
-    if jid not in jobs or jobs[jid]['status'] != 'completed':
-        raise HTTPException(400, "not ready")
-    f = OUTPUT_DIR / f"{jid}.mp3"
-    return FileResponse(f, filename=f"{jobs[jid]['file'].replace('.pdf','')}.mp3", media_type="audio/mpeg") if f.exists() else None
-
-def detect_speaker(text: str) -> str:
+def detect_speaker(text: str, segment_index: int = 0) -> str:
+    """Detect appropriate speaker voice based on text content and variation"""
+    text_lower = text.lower()
+    
+    # Dialogue detection (quoted speech)
     if re.search(r'"[^"]{10,}"', text):
+        # Character dialogue - alternate between male and female voices
+        if re.search(r'(he said|asked|replied|exclaimed|shouted|whispered)', text_lower):
+            return "male_1" if segment_index % 2 == 0 else "female_1"
         return "male_1"
+    
     if re.search(r"'[^']{10,}'", text):
         return "female_1"
-    return "narrator"
+    
+    # Question detection - use different voice for variety
+    if text.strip().endswith('?'):
+        return "female_2" if segment_index % 3 == 0 else "male_2"
+    
+    # Exclamation detection
+    if text.strip().endswith('!'):
+        return "male_2" if segment_index % 2 == 0 else "female_1"
+    
+    # Narrative text - rotate through narrator and other voices for variation
+    # This prevents monotone reading by varying the voice every few segments
+    voice_rotation = [
+        "narrator",    # Primary narrator (Joanna - female)
+        "male_2",      # Secondary narrator (Justin - male)
+        "male_1",      # Tertiary (Matthew - male)
+    ]
+    return voice_rotation[segment_index % len(voice_rotation)]
 
 def extract_segments(pdf_path: Path) -> list:
     segments = []
     try:
         with pdfplumber.open(pdf_path) as pdf:
             logger.info(f"📖 Opening PDF: {pdf_path}, Pages: {len(pdf.pages)}")
+            segment_index = 0
             for page_num, page in enumerate(pdf.pages):
                 text = page.extract_text()
                 if text:
                     page_segments = 0
                     for para in text.split('\n\n'):
                         if para.strip():
-                            segments.append({"text": para.strip(), "speaker": detect_speaker(para), "page": page_num + 1})
+                            segments.append({"text": para.strip(), "speaker": detect_speaker(para, segment_index), "page": page_num + 1})
+                            segment_index += 1
                             page_segments += 1
                     logger.info(f"Page {page_num + 1}: Extracted {page_segments} paragraphs")
             logger.info(f"✅ Total segments extracted: {len(segments)}")
