@@ -39,6 +39,8 @@ jobs:
           LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
           LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
           LIGHTSAIL_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           mkdir -p ~/.ssh
           echo "$LIGHTSAIL_KEY" > ~/.ssh/id_rsa
@@ -49,6 +51,12 @@ jobs:
             git pull origin main
             source venv/bin/activate
             pip install -r requirements.txt
+            # Write AWS credentials to .env file for Polly
+            cat > .env << 'EOF'
+AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+AWS_REGION=us-east-1
+EOF
             sudo systemctl restart narrativeai
             echo "✅ Deployment successful!"
           DEPLOY
