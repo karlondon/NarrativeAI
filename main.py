@@ -82,13 +82,13 @@ jobs = load_jobs_from_disk()
 logger.info(f"Loaded {len(jobs)} jobs from disk")
 
 VOICES = {
-    "narrator": "Joanna",           # Female narrator - warm, engaging, professional (Neural available)
-    "male_1": "Liam",               # Male voice - strong, deep, authoritative (Neural - Irish accent)
-    "male_2": "Matthew",            # Male voice - professional, clear (Neural available)
-    "female_1": "Olivia",           # Female voice - mature, professional (Neural available)
-    "female_2": "Salli",            # Female voice - mature, professional (Neural available)
-    "old_male": "Russell",          # Male voice - distinguished, wise (Neural available)
-    "child": "Ivy"                  # Female voice - younger but not too childish
+    "narrator": "Joanna",           # Female narrator - warm, engaging, professional (Neural supported)
+    "male_1": "Matthew",            # Male voice - professional, clear (Neural supported)
+    "male_2": "Justin",             # Male voice - friendly, clear (Neural supported)
+    "female_1": "Ivy",              # Female voice - energetic, professional (Neural supported)
+    "female_2": "Salli",            # Female voice - mature, professional (Neural supported)
+    "old_male": "Brian",            # Male voice - distinguished, wise (Neural supported)
+    "child": "Kimberly"             # Female voice - younger (Neural supported)
 }
 
 class Health(BaseModel):
@@ -361,15 +361,13 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                     voice = VOICES.get(voice_id, VOICES["narrator"])
                     
                     # Create SSML with prosody tags for better clarity and adult-like quality
-                    # Neural engine DOES support prosody tags (unlike what old comment said)
+                    # Neural engine supports prosody tags but NOT amazon:auto-breaths
                     # Rate: 90% = slightly slower for clarity
                     # Pitch: 0% = neutral (default)
                     ssml_text = f'''<speak>
-                        <amazon:auto-breaths>
-                            <prosody rate="90%" pitch="0%">
-                                {text}
-                            </prosody>
-                        </amazon:auto-breaths>
+                        <prosody rate="90%" pitch="0%">
+                            {text}
+                        </prosody>
                     </speak>'''
                     
                     # Use NEURAL engine for natural, human-like quality
@@ -385,6 +383,7 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                         VoiceId=voice, 
                         Engine="neural"  # Switched to neural for professional quality
                     )
+
                     audio_path = OUTPUT_DIR / f"{jid}_seg_{idx:06d}.mp3"
                     audio_path.write_bytes(response["AudioStream"].read())
                     audio_files.append(audio_path)
