@@ -21,7 +21,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="NarrativeAI", version="0.2.0")
+app = FastAPI(title="NarrativeAI", version="0.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 try:
@@ -78,7 +78,7 @@ class Health(BaseModel):
 
 @app.get("/health", response_model=Health)
 async def health():
-    return Health(status="healthy", version="0.2.0", aws_ok=bool(os.getenv('AWS_ACCESS_KEY_ID')))
+    return Health(status="healthy", version="0.3.0", aws_ok=bool(os.getenv('AWS_ACCESS_KEY_ID')))
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -280,6 +280,8 @@ def run_process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
             save_jobs_to_disk(jobs)
 
 async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
+    global GLOBAL_CHARACTER_VOICES
+    GLOBAL_CHARACTER_VOICES = {}  # Reset character voices for each new PDF
     try:
         logger.info(f"Starting {jid}")
         with jobs_lock:
@@ -314,9 +316,9 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                         logger.warning(f"Segment {idx} too long ({len(text)} chars), truncating to 2900")
                         text = text[:2900]
                     
-                    ssml = f'<speak>{text}</speak>'
-                    response = polly.synthesize_speech(Text=ssml, TextType="ssml", OutputFormat="mp3", VoiceId=voice, Engine="neural")
-                    audio_path = OUTPUT_DIR / f"{jid}_seg_{idx}.mp3"
+                    # Use pre-computed ssml_text with prosody tags (CRITICAL: don't recreate plain SSML!)
+                    response = polly.synthesize_speech(Text=ssml_text, TextType="ssml", OutputFormat="mp3", VoiceId=voice, Engine="neural")
+                    audio_path = OUTPUT_DIR / f"{jid}_seg_{idx:06d}.mp3"
                     audio_path.write_bytes(response["AudioStream"].read())
                     audio_files.append(audio_path)
                     
@@ -325,10 +327,10 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                     with jobs_lock:
                         jobs[jid]["progress"] = progress
                         save_jobs_to_disk(jobs)
-                    logger.info(f"Job {jid}: Progress {progress}% - Synthesized segment {idx + 1}/{len(segments)} ({len(text)} chars)")
+                    logger.info(f"Job {jid}: Progress {progress}% - Synthesized segment {idx + 1}/{len(segments)} with voice {voice_id} ({len(text)} chars)")
                     
                     # Small delay to allow frontend to poll
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.05)
                 except Exception as e:
                     logger.error(f"❌ Segment {idx} error: {e}")
                     continue
