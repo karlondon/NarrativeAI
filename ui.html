@@ -230,7 +230,7 @@ function monitorJob(jobId) {
     } catch (error) {
       console.error(error);
     }
-  }, 1000);
+  }, 500);  // Poll every 500ms for smoother updates
 }
 </script>
 </body>

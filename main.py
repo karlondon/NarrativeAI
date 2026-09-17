@@ -1,4 +1,4 @@
-import os, logging, time, re, subprocess, asyncio
+import os, logging, time, re, subprocess, asyncio, threading
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, HTMLResponse
@@ -25,6 +25,7 @@ UPLOAD_DIR, OUTPUT_DIR = Path("uploads"), Path("output")
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 jobs = {}
+jobs_lock = threading.Lock()  # Thread-safe access to jobs dict
 
 VOICES = {"narrator": "Joanna", "male_1": "Matthew", "male_2": "Justin",
     "female_1": "Ivy", "female_2": "Salli", "old_male": "Gary", "child": "Kimberly"}
@@ -52,14 +53,16 @@ async def upload(bg: BackgroundTasks, file: UploadFile = File(...), multi_voice:
         raise HTTPException(413, "File too large")
     jid = f"job_{int(time.time())}_{file.filename.replace('.pdf','')}"
     (UPLOAD_DIR / f"{jid}.pdf").write_bytes(content)
-    jobs[jid] = {"id": jid, "status": "pending", "file": file.filename, "progress": 0}
-    bg.add_task(run_process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice)
+    with jobs_lock:
+        jobs[jid] = {"id": jid, "status": "pending", "file": file.filename, "progress": 0}
     logger.info(f"Job {jid} queued")
+    bg.add_task(run_process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice)
     return {"job_id": jid, "status": "pending"}
 
 @app.get("/jobs/{jid}")
 async def status(jid: str):
-    return jobs.get(jid, {"error": "not found"})
+    with jobs_lock:
+        return jobs.get(jid, {"error": "not found"})
 
 @app.get("/jobs/{jid}/download")
 async def download(jid: str):
@@ -102,8 +105,9 @@ def run_process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
 async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
     try:
         logger.info(f"Starting {jid}")
-        jobs[jid]["status"] = "processing"
-        jobs[jid]["progress"] = 5
+        with jobs_lock:
+            jobs[jid]["status"] = "processing"
+            jobs[jid]["progress"] = 5
         logger.info(f"Job {jid}: Progress 5% - Starting extraction")
         
         segments = extract_segments(path)
@@ -111,7 +115,8 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
             raise ValueError("No text found")
         
         logger.info(f"Found {len(segments)} segments")
-        jobs[jid]["progress"] = 20
+        with jobs_lock:
+            jobs[jid]["progress"] = 20
         logger.info(f"Job {jid}: Progress 20% - Extraction complete")
         
         audio_files = []
@@ -128,7 +133,8 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                     
                     # Calculate progress (20-85%)
                     progress = 20 + int((idx / len(segments)) * 65)
-                    jobs[jid]["progress"] = progress
+                    with jobs_lock:
+                        jobs[jid]["progress"] = progress
                     logger.info(f"Job {jid}: Progress {progress}% - Synthesized segment {idx + 1}/{len(segments)}")
                     
                     # Small delay to allow frontend to poll
@@ -137,7 +143,8 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                     logger.error(f"Segment error: {e}")
                     continue
             
-            jobs[jid]["progress"] = 85
+            with jobs_lock:
+                jobs[jid]["progress"] = 85
             logger.info(f"Job {jid}: Progress 85% - All segments synthesized")
             
             if audio_files:
@@ -147,7 +154,8 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                         for af in audio_files:
                             f.write(f"file '{af}'\n")
                     
-                    jobs[jid]["progress"] = 90
+                    with jobs_lock:
+                        jobs[jid]["progress"] = 90
                     logger.info(f"Job {jid}: Progress 90% - Concatenating audio")
                     
                     output_path = OUTPUT_DIR / f"{jid}.mp3"
@@ -162,13 +170,15 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                         for af in audio_files[1:]:
                             af.unlink(missing_ok=True)
         
-        jobs[jid]["status"] = "completed"
-        jobs[jid]["progress"] = 100
+        with jobs_lock:
+            jobs[jid]["status"] = "completed"
+            jobs[jid]["progress"] = 100
         logger.info(f"Job {jid}: Progress 100% - Completed")
     except Exception as e:
         logger.error(f"Error: {e}")
-        jobs[jid]["status"] = "failed"
-        jobs[jid]["error"] = str(e)
+        with jobs_lock:
+            jobs[jid]["status"] = "failed"
+            jobs[jid]["error"] = str(e)
 
 def get_html_ui():
     return ""
