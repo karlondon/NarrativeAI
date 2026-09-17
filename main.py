@@ -82,13 +82,13 @@ jobs = load_jobs_from_disk()
 logger.info(f"Loaded {len(jobs)} jobs from disk")
 
 VOICES = {
-    "narrator": "Joanna",           # Female narrator - warm, engaging
-    "male_1": "Matthew",            # Male voice - strong, authoritative
-    "male_2": "Justin",             # Male voice - younger, friendly
-    "female_1": "Ivy",              # Female voice - energetic, young
-    "female_2": "Salli",            # Female voice - mature, professional
-    "old_male": "Gary",             # Male voice - older, wise
-    "child": "Kimberly"             # High-pitched for children
+    "narrator": "Joanna",           # Female narrator - warm, engaging, professional (Neural available)
+    "male_1": "Liam",               # Male voice - strong, deep, authoritative (Neural - Irish accent)
+    "male_2": "Matthew",            # Male voice - professional, clear (Neural available)
+    "female_1": "Olivia",           # Female voice - mature, professional (Neural available)
+    "female_2": "Salli",            # Female voice - mature, professional (Neural available)
+    "old_male": "Russell",          # Male voice - distinguished, wise (Neural available)
+    "child": "Ivy"                  # Female voice - younger but not too childish
 }
 
 class Health(BaseModel):
@@ -163,13 +163,18 @@ def detect_speaker(text: str, segment_index: int = 0) -> tuple:
     5. Exclamations (ends with !)
     6. Emotional tone analysis (sentiment polarity)
     7. Voice rotation for narrative variety
+    
+    OPTIMIZED FOR: Professional adult narration with clear enunciation
+    - All rates set to 85-95% (slower for clarity, adult-like pace)
+    - Neural engine will handle prosody naturally
+    - Professional voice selection only
     """
     global GLOBAL_CHARACTER_VOICES
     
     text_lower = text.lower()
     voice_id = "narrator"
     pitch = "0%"
-    rate = "100%"
+    rate = "90%"  # Default to 90% (slightly slower for clarity)
     
     # LEVEL 1: CHARACTER NAME DETECTION - assigns consistent voices to named characters
     char_pattern = r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+(?:said|asked|replied|exclaimed|shouted|whispered|muttered|hissed|bellowed|cried)'
@@ -178,14 +183,15 @@ def detect_speaker(text: str, segment_index: int = 0) -> tuple:
     if char_matches:
         char_name = char_matches[0]
         if char_name not in GLOBAL_CHARACTER_VOICES:
+            # Use only professional adult voices
             available_voices = ["male_1", "male_2", "female_1", "female_2", "old_male"]
             char_index = len(GLOBAL_CHARACTER_VOICES) % len(available_voices)
             GLOBAL_CHARACTER_VOICES[char_name] = available_voices[char_index]
             logger.info(f"🎭 NEW CHARACTER: '{char_name}' → {GLOBAL_CHARACTER_VOICES[char_name]}")
         
         voice_id = GLOBAL_CHARACTER_VOICES[char_name]
-        pitch = "+10%"
-        rate = "95%"
+        pitch = "+5%"  # Subtle pitch increase for dialogue
+        rate = "88%"   # Slightly slower for clear dialogue
     
     # LEVEL 2: DIALOGUE DETECTION - Gender-aware dialogue handling
     elif re.search(r'"[^"]{10,}"', text):
@@ -195,26 +201,26 @@ def detect_speaker(text: str, segment_index: int = 0) -> tuple:
             voice_id = "female_2"
         else:
             voice_id = "male_1" if segment_index % 2 == 0 else "female_1"
-        pitch = "+15%"
-        rate = "95%"
+        pitch = "+3%"   # Very subtle pitch for natural dialogue
+        rate = "88%"    # Clear dialogue delivery
     
     # LEVEL 3: SINGLE-QUOTED SPEECH
     elif re.search(r"'[^']{10,}'", text):
         voice_id = "female_1"
-        pitch = "+10%"
-        rate = "98%"
+        pitch = "+3%"
+        rate = "88%"
     
-    # LEVEL 4: QUESTIONS - faster delivery
+    # LEVEL 4: QUESTIONS - slightly faster but still clear
     elif text.strip().endswith('?'):
         voice_id = "female_2" if segment_index % 3 == 0 else "male_2"
-        pitch = "+8%"
-        rate = "115%"
+        pitch = "+2%"
+        rate = "90%"   # Slightly faster than narrative
     
-    # LEVEL 5: EXCLAMATIONS - energetic
+    # LEVEL 5: EXCLAMATIONS - energetic but professional
     elif text.strip().endswith('!'):
         voice_id = "male_2" if segment_index % 2 == 0 else "female_1"
-        pitch = "+20%"
-        rate = "110%"
+        pitch = "+5%"
+        rate = "92%"   # Energetic but still clear
     
     # LEVEL 6: EMOTIONAL TONE DETECTION using TextBlob sentiment analysis
     else:
@@ -223,28 +229,35 @@ def detect_speaker(text: str, segment_index: int = 0) -> tuple:
                 blob = TextBlob(text[:500])
                 polarity = blob.sentiment.polarity
                 
-                if polarity > 0.4:  # Happy/positive
+                if polarity > 0.4:  # Happy/positive - slightly faster and higher pitch
                     voice_id = "female_1"
-                    pitch = "+15%"
-                    rate = "110%"
-                elif polarity < -0.4:  # Sad/negative
+                    pitch = "+5%"
+                    rate = "92%"
+                elif polarity < -0.4:  # Sad/negative - slower and deeper
                     voice_id = "old_male"
-                    pitch = "-15%"
-                    rate = "85%"
-                else:  # Neutral
+                    pitch = "-5%"
+                    rate = "85%"  # Slowest for emotional impact
+                else:  # Neutral - balanced narrator pace
                     voice_rotation = ["narrator", "male_2", "male_1"]
                     voice_id = voice_rotation[segment_index % len(voice_rotation)]
+                    pitch = "0%"
+                    rate = "90%"  # Standard pace
             else:
                 # LEVEL 7: FALLBACK - Voice rotation
                 voice_rotation = ["narrator", "male_2", "male_1"]
                 voice_id = voice_rotation[segment_index % len(voice_rotation)]
+                pitch = "0%"
+                rate = "90%"
         except Exception as e:
             logger.debug(f"Sentiment analysis failed: {e}")
             voice_rotation = ["narrator", "male_2", "male_1"]
             voice_id = voice_rotation[segment_index % len(voice_rotation)]
+            pitch = "0%"
+            rate = "90%"
     
-    # BUILD SSML TEXT WITH PROSODY TAGS
-    if pitch != "0%" or rate != "100%":
+    # BUILD SSML TEXT WITH PROSODY TAGS (Neural engine will handle naturally)
+    # Note: These tags work with Neural engine for subtle, professional delivery
+    if pitch != "0%" or rate != "90%":
         ssml_text = f'<speak><prosody pitch="{pitch}" rate="{rate}">{text}</prosody></speak>'
     else:
         ssml_text = f'<speak>{text}</speak>'
@@ -344,22 +357,33 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                         logger.warning(f"Segment {idx} too long ({len(text)} chars), truncating to 2000")
                         text = text[:2000]
                     
-                    # Create SSML with prosody tags for voice modulation (standard engine supports this)
-                    # Only use prosody if we have sentiment data
+                    # Get the voice name
                     voice = VOICES.get(voice_id, VOICES["narrator"])
-                    if use_multi_voice and "sentiment" in seg:
-                        ssml_text = seg.get("ssml_text", f'<speak>{text}</speak>')
-                    else:
-                        ssml_text = f'<speak>{text}</speak>'
                     
-                    # Use standard engine which supports SSML prosody tags
-                    # Neural engine does NOT support prosody, so we use standard
+                    # Create SSML with prosody tags for better clarity and adult-like quality
+                    # Neural engine DOES support prosody tags (unlike what old comment said)
+                    # Rate: 90% = slightly slower for clarity
+                    # Pitch: 0% = neutral (default)
+                    ssml_text = f'''<speak>
+                        <amazon:auto-breaths>
+                            <prosody rate="90%" pitch="0%">
+                                {text}
+                            </prosody>
+                        </amazon:auto-breaths>
+                    </speak>'''
+                    
+                    # Use NEURAL engine for natural, human-like quality
+                    # Neural engine provides:
+                    # - Natural prosody (pitch, rhythm, intonation)
+                    # - Better emotional expression
+                    # - Clearer enunciation
+                    # - More adult-sounding voices
                     response = polly_client.synthesize_speech(
                         Text=ssml_text, 
                         TextType="ssml", 
                         OutputFormat="mp3", 
                         VoiceId=voice, 
-                        Engine="standard"  # Changed from neural to standard
+                        Engine="neural"  # Switched to neural for professional quality
                     )
                     audio_path = OUTPUT_DIR / f"{jid}_seg_{idx:06d}.mp3"
                     audio_path.write_bytes(response["AudioStream"].read())
@@ -370,7 +394,7 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                     with jobs_lock:
                         jobs[jid]["progress"] = progress
                         save_jobs_to_disk(jobs)
-                    logger.info(f"Job {jid}: Progress {progress}% - Synthesized segment {idx + 1}/{len(segments)} with voice {voice_id} ({len(text)} chars)")
+                    logger.info(f"Job {jid}: Progress {progress}% - Synthesized segment {idx + 1}/{len(segments)} with voice {voice} (Neural, 90% rate) ({len(text)} chars)")
                     
                     # Small delay to allow frontend to poll
                     await asyncio.sleep(0.05)
