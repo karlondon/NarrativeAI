@@ -336,17 +336,31 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                 try:
                     # Use the pre-computed voice_id and ssml_text from detect_speaker
                     voice_id = seg["voice_id"] if use_multi_voice else "narrator"
-                    ssml_text = seg["ssml_text"] if use_multi_voice else f'<speak>{seg["text"]}</speak>'
-                    voice = VOICES.get(voice_id, VOICES["narrator"])
                     text = seg["text"]
                     
-                    # AWS Polly limit is 3000 characters, use 2900 to be safe
-                    if len(text) > 2900:
-                        logger.warning(f"Segment {idx} too long ({len(text)} chars), truncating to 2900")
-                        text = text[:2900]
+                    # AWS Polly limit is 3000 characters for SSML
+                    # We use 2000 to be safe since SSML tags add overhead
+                    if len(text) > 2000:
+                        logger.warning(f"Segment {idx} too long ({len(text)} chars), truncating to 2000")
+                        text = text[:2000]
                     
-                    # Use pre-computed ssml_text with prosody tags (CRITICAL: don't recreate plain SSML!)
-                    response = polly_client.synthesize_speech(Text=ssml_text, TextType="ssml", OutputFormat="mp3", VoiceId=voice, Engine="neural")
+                    # Create SSML with prosody tags for voice modulation (standard engine supports this)
+                    # Only use prosody if we have sentiment data
+                    voice = VOICES.get(voice_id, VOICES["narrator"])
+                    if use_multi_voice and "sentiment" in seg:
+                        ssml_text = seg.get("ssml_text", f'<speak>{text}</speak>')
+                    else:
+                        ssml_text = f'<speak>{text}</speak>'
+                    
+                    # Use standard engine which supports SSML prosody tags
+                    # Neural engine does NOT support prosody, so we use standard
+                    response = polly_client.synthesize_speech(
+                        Text=ssml_text, 
+                        TextType="ssml", 
+                        OutputFormat="mp3", 
+                        VoiceId=voice, 
+                        Engine="standard"  # Changed from neural to standard
+                    )
                     audio_path = OUTPUT_DIR / f"{jid}_seg_{idx:06d}.mp3"
                     audio_path.write_bytes(response["AudioStream"].read())
                     audio_files.append(audio_path)
