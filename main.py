@@ -53,7 +53,7 @@ async def upload(bg: BackgroundTasks, file: UploadFile = File(...), multi_voice:
     jid = f"job_{int(time.time())}_{file.filename.replace('.pdf','')}"
     (UPLOAD_DIR / f"{jid}.pdf").write_bytes(content)
     jobs[jid] = {"id": jid, "status": "pending", "file": file.filename, "progress": 0}
-    bg.add_task(process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice)
+    bg.add_task(run_process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice)
     logger.info(f"Job {jid} queued")
     return {"job_id": jid, "status": "pending"}
 
@@ -89,6 +89,15 @@ def extract_segments(pdf_path: Path) -> list:
         logger.error(f"Error: {e}")
         raise
     return segments
+
+def run_process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
+    """Wrapper to run async process_pdf in background task"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(process_pdf(jid, path, use_multi_voice))
+    finally:
+        loop.close()
 
 async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
     try:
