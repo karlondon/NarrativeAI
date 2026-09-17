@@ -74,12 +74,15 @@ async def upload(bg: BackgroundTasks, file: UploadFile = File(...), multi_voice:
     content = await file.read()
     if len(content) > 50*1024*1024:
         raise HTTPException(413, "File too large")
-    jid = f"job_{int(time.time())}_{file.filename.replace('.pdf','')}"
+    # Create job ID with just timestamp + random suffix (avoid filename issues)
+    import uuid
+    jid = f"job_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    pdf_filename = file.filename.replace('.pdf', '')
     (UPLOAD_DIR / f"{jid}.pdf").write_bytes(content)
     with jobs_lock:
-        jobs[jid] = {"id": jid, "status": "pending", "file": file.filename, "progress": 0}
+        jobs[jid] = {"id": jid, "status": "pending", "file": file.filename, "filename": pdf_filename, "progress": 0}
         save_jobs_to_disk(jobs)  # Persist to disk
-    logger.info(f"Job {jid} queued")
+    logger.info(f"✅ Job {jid} created for file: {file.filename}")
     bg.add_task(run_process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice)
     return {"job_id": jid, "status": "pending"}
 
