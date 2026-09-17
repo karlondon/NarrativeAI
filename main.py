@@ -451,9 +451,6 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                 audio_files[0].rename(OUTPUT_DIR / f"{jid}.mp3")
                 for af in audio_files[1:]:
                     af.unlink(missing_ok=True)
-                    else:
-                        raise
-
         
         with jobs_lock:
             jobs[jid]["status"] = "completed"
