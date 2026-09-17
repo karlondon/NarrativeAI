@@ -346,6 +346,16 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                 jobs[jid]["progress"] = 85
                 save_jobs_to_disk(jobs)
             logger.info(f"Job {jid}: Progress 85% - All segments synthesized")
+        else:
+            logger.error(f"❌ AWS Polly not available - cannot synthesize audio. Check AWS credentials.")
+            raise Exception("AWS Polly not configured - check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
+
+        # Verify we have audio files to concatenate
+        if not audio_files:
+            logger.error(f"❌ No audio files were created during synthesis")
+            raise Exception("Audio synthesis failed - no audio files generated")
+
+
             
             if audio_files:
                 try:
