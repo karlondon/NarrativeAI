@@ -125,12 +125,30 @@ def extract_segments(pdf_path: Path) -> list:
 
 def run_process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
     """Wrapper to run async process_pdf in background task"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    print(f"🚀 BACKGROUND TASK STARTED for {jid}")
+    print(f"File path: {path}, exists: {path.exists()}")
+    logger.info(f"🚀 BACKGROUND TASK STARTED for {jid}")
+    logger.info(f"File path: {path}, exists: {path.exists()}")
+    
     try:
-        loop.run_until_complete(process_pdf(jid, path, use_multi_voice))
-    finally:
-        loop.close()
+        if not path.exists():
+            raise FileNotFoundError(f"PDF file not found: {path}")
+            
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(process_pdf(jid, path, use_multi_voice))
+        finally:
+            loop.close()
+    except Exception as e:
+        error_msg = f"Background task failed: {str(e)}"
+        print(f"💥 CRITICAL ERROR in {jid}: {error_msg}")
+        logger.error(f"💥 CRITICAL ERROR in background task {jid}: {e}", exc_info=True)
+        with jobs_lock:
+            jobs[jid]["status"] = "failed"
+            jobs[jid]["error"] = error_msg
+            jobs[jid]["progress"] = 0
+            save_jobs_to_disk(jobs)
 
 async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
     try:

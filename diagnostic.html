@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>NarrativeAI - Diagnostic Tool</title>
+  <style>
+    body { font-family: monospace; background: #1e1e1e; color: #00ff00; padding: 20px; }
+    .container { max-width: 1000px; margin: 0 auto; }
+    h1 { color: #00ffff; }
+    .section { margin: 20px 0; padding: 15px; background: #2d2d2d; border-left: 3px solid #00ff00; }
+    .log { background: #1a1a1a; padding: 10px; margin: 5px 0; border-radius: 4px; font-size: 12px; }
+    .success { color: #00ff00; }
+    .error { color: #ff0000; }
+    .warning { color: #ffff00; }
+    .info { color: #00ffff; }
+    button { background: #00ff00; color: #000; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin: 5px; font-weight: bold; }
+    button:hover { background: #00cc00; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>🔧 NarrativeAI Diagnostic Tool</h1>
+  
+  <div class="section">
+    <h2>Test Backend Connection</h2>
+    <button onclick="testHealth()">Test /health</button>
+    <button onclick="testListJobs()">List All Jobs</button>
+    <div id="health-log"></div>
+  </div>
+
+  <div class="section">
+    <h2>Recent Jobs Status</h2>
+    <button onclick="loadRecentJobs()">Load Recent Jobs</button>
+    <div id="jobs-list"></div>
+  </div>
+
+  <div class="section">
+    <h2>Real-time Monitor</h2>
+    <input type="text" id="monitor-job-id" placeholder="Enter job ID" style="padding: 8px; width: 300px; background: #333; color: #00ff00; border: 1px solid #00ff00;">
+    <button onclick="startMonitoring()">Start Monitoring</button>
+    <button onclick="stopMonitoring()">Stop Monitoring</button>
+    <div id="monitor-log"></div>
+  </div>
+</div>
+
+<script>
+let monitorInterval = null;
+
+async function testHealth() {
+  const log = document.getElementById('health-log');
+  log.innerHTML = '<div class="log info">⏳ Testing /health endpoint...</div>';
+  
+  try {
+    const response = await fetch('/health', { cache: 'no-store' });
+    const data = await response.json();
+    log.innerHTML += `<div class="log success">✅ /health OK: ${JSON.stringify(data)}</div>`;
+  } catch (error) {
+    log.innerHTML += `<div class="log error">❌ Error: ${error.message}</div>`;
+  }
+}
+
+async function testListJobs() {
+  const log = document.getElementById('health-log');
+  log.innerHTML = '<div class="log info">⏳ Fetching all jobs...</div>';
+  
+  try {
+    const response = await fetch('/jobs', { cache: 'no-store' });
+    const data = await response.json();
+    log.innerHTML += `<div class="log success">✅ Jobs fetched:</div>`;
+    log.innerHTML += `<div class="log">${JSON.stringify(data, null, 2)}</div>`;
+  } catch (error) {
+    log.innerHTML += `<div class="log error">❌ Error: ${error.message}</div>`;
+  }
+}
+
+async function loadRecentJobs() {
+  const jobsList = document.getElementById('jobs-list');
+  jobsList.innerHTML = '<div class="log info">⏳ Loading recent jobs...</div>';
+  
+  try {
+    const response = await fetch('/jobs', { cache: 'no-store' });
+    const jobs = await response.json();
+    
+    if (!jobs || Object.keys(jobs).length === 0) {
+      jobsList.innerHTML = '<div class="log warning">⚠️ No jobs found</div>';
+      return;
+    }
+    
+    jobsList.innerHTML = '<div class="log success">✅ Recent Jobs:</div>';
+    for (const [jid, job] of Object.entries(jobs)) {
+      jobsList.innerHTML += `<div class="log">
+        <strong>ID:</strong> ${jid}<br>
+        <strong>Status:</strong> ${job.status} | <strong>Progress:</strong> ${job.progress}%<br>
+        <strong>File:</strong> ${job.file}</div>`;
+    }
+  } catch (error) {
+    jobsList.innerHTML = `<div class="log error">❌ Error: ${error.message}</div>`;
+  }
+}
+
+function startMonitoring() {
+  const jobId = document.getElementById('monitor-job-id').value;
+  if (!jobId) {
+    alert('Enter a Job ID first');
+    return;
+  }
+  
+  if (monitorInterval) clearInterval(monitorInterval);
+  
+  const log = document.getElementById('monitor-log');
+  log.innerHTML = `<div class="log info">🚀 Started monitoring: ${jobId}</div>`;
+  let pollCount = 0;
+  
+  monitorInterval = setInterval(async () => {
+    pollCount++;
+    try {
+      const response = await fetch(`/jobs/${jobId}`, { cache: 'no-store' });
+      const job = await response.json();
+      
+      const statusClass = job.status === 'completed' ? 'success' : 
+                          job.status === 'failed' ? 'error' : 'info';
+      
+      log.innerHTML = `<div class="log ${statusClass}">Poll #${pollCount}: Status=${job.status} | Progress=${job.progress}%</div>` + log.innerHTML;
+      
+      if (log.children.length > 50) log.removeChild(log.lastChild);
+      
+      if (job.status === 'completed' || job.status === 'failed') {
+        clearInterval(monitorInterval);
+        log.innerHTML = `<div class="log success">✅ Stopped - Job ${job.status}</div>` + log.innerHTML;
+      }
+    } catch (error) {
+      log.innerHTML = `<div class="log error">Poll #${pollCount} Error: ${error.message}</div>` + log.innerHTML;
+    }
+  }, 500);
+}
+
+function stopMonitoring() {
+  if (monitorInterval) {
+    clearInterval(monitorInterval);
+    document.getElementById('monitor-log').innerHTML += '<div class="log warning">Monitoring stopped</div>';
+  }
+}
+
+window.addEventListener('load', () => {
+  document.getElementById('health-log').innerHTML = '<div class="log info">Use buttons to diagnose backend</div>';
+});
+</script>
+</body>
+</html>

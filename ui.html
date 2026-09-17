@@ -59,8 +59,8 @@
     .status-processing { background: #cfe2ff; color: #084298; }
     .status-completed { background: #d1e7dd; color: #0f5132; }
     .status-failed { background: #f8d7da; color: #842029; }
-    .progress-bar { width: 100%; height: 8px; background: #e0e0e0; border-radius: 10px; margin: 15px 0; }
-    .progress-fill { height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); width: 0%; transition: width 0.3s; }
+    .progress-bar { width: 100%; height: 12px; background: #e0e0e0; border-radius: 10px; margin: 15px 0; overflow: hidden; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); width: 0%; transition: width 0.4s ease-out; border-radius: 10px; box-shadow: 0 0 10px rgba(102, 126, 234, 0.6); }
     .btn-download { background: #28a745; color: white; width: 100%; padding: 10px; border-radius: 8px; text-decoration: none; text-align: center; font-weight: 600; margin-top: 10px; display: inline-block; border: none; cursor: pointer; }
     .btn-download:hover { background: #218838; text-decoration: none; }
     .error-message { background: #f8d7da; color: #842029; padding: 12px; border-radius: 8px; margin-top: 10px; }
@@ -166,22 +166,37 @@ uploadBtn.addEventListener("click", async () => {
   formData.append("multi_voice", multiVoiceCheckbox.checked);
 
   try {
+    console.log("📤 Uploading file:", selectedFile.name);
     const response = await fetch("/upload", {
       method: "POST",
       body: formData
     });
 
     const data = await response.json();
+    console.log("📨 Upload response:", data);
 
     if (response.ok) {
+      console.log("✅ Upload successful! Job ID:", data.job_id);
       statusSection.classList.add("active");
       document.getElementById("job-name").textContent = selectedFile.name;
+      
+      // Reset progress bar
+      document.getElementById("job-progress").textContent = "0%";
+      document.getElementById("progress-fill").style.width = "0%";
+      document.getElementById("job-status").textContent = "PENDING";
+      document.getElementById("job-status").className = "status-badge status-pending";
+      document.getElementById("download-btn").style.display = "none";
+      document.getElementById("error-container").innerHTML = "";
+      
+      // Start monitoring
       monitorJob(data.job_id);
     } else {
       alert("Upload failed: " + (data.detail || "Unknown error"));
+      console.error("❌ Upload error:", data);
     }
   } catch (error) {
     alert("Error: " + error.message);
+    console.error("💥 Upload exception:", error);
   } finally {
     uploadBtn.disabled = false;
     uploadBtn.textContent = "🚀 Upload & Convert";
@@ -190,47 +205,101 @@ uploadBtn.addEventListener("click", async () => {
 
 function monitorJob(jobId) {
   let pollCount = 0;
-  const maxPolls = 600;
+  const maxPolls = 1200;  // 10 minutes at 500ms polling
+  let lastProgress = -1;  // Track last progress to detect changes
+
+  console.log("🚀 MONITOR STARTED for job:", jobId);
 
   const interval = setInterval(async () => {
     pollCount++;
 
     if (pollCount > maxPolls) {
       clearInterval(interval);
-      alert("Conversion timeout");
+      console.error("❌ TIMEOUT: Job did not complete within 10 minutes");
+      alert("⏱️ Conversion timeout - took too long");
       return;
     }
 
     try {
-      const response = await fetch("/jobs/" + jobId);
+      // Fetch job status
+      const response = await fetch("/jobs/" + jobId, {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+        cache: "no-store"  // Prevent browser caching
+      });
+
+      if (!response.ok) {
+        console.warn(`⚠️ Poll ${pollCount}: HTTP ${response.status}`);
+        return;
+      }
+
       const job = await response.json();
+      const status = (job.status || "pending").toLowerCase();
+      const progress = parseInt(job.progress) || 0;
 
-      const status = job.status || "pending";
-      const progress = job.progress || 0;
+      // Only log if progress changed
+      if (progress !== lastProgress) {
+        console.log(`📊 Poll ${pollCount}: Status=${status}, Progress=${progress}%`);
+        lastProgress = progress;
+      }
 
+      // Update status badge
       const statusEl = document.getElementById("job-status");
-      statusEl.textContent = status.toUpperCase();
-      statusEl.className = "status-badge status-" + status;
+      if (statusEl) {
+        statusEl.textContent = status.toUpperCase();
+        statusEl.className = "status-badge status-" + status;
+      }
 
-      document.getElementById("job-progress").textContent = progress + "%";
-      document.getElementById("progress-fill").style.width = progress + "%";
+      // Update progress text and bar
+      const progressTextEl = document.getElementById("job-progress");
+      const progressFillEl = document.getElementById("progress-fill");
+      
+      if (progressTextEl) {
+        progressTextEl.textContent = progress + "%";
+      }
+      
+      if (progressFillEl) {
+        // Force reflow to ensure CSS transition triggers
+        progressFillEl.style.width = progress + "%";
+      }
 
+      // COMPLETION HANDLER
       if (status === "completed") {
         clearInterval(interval);
+        console.log("✅ JOB COMPLETED! Progress:", progress + "%");
+        
+        // Ensure progress shows 100%
+        if (progressTextEl) progressTextEl.textContent = "100%";
+        if (progressFillEl) progressFillEl.style.width = "100%";
+        
+        // Show download button
         const dlBtn = document.getElementById("download-btn");
-        dlBtn.href = "/jobs/" + jobId + "/download";
-        dlBtn.style.display = "inline-block";
+        if (dlBtn) {
+          dlBtn.href = "/jobs/" + jobId + "/download";
+          dlBtn.style.display = "inline-block";
+          console.log("📥 Download button enabled");
+        }
+        return;
       }
 
+      // FAILURE HANDLER
       if (status === "failed") {
         clearInterval(interval);
-        document.getElementById("error-container").innerHTML = 
-          "<div class='error-message'>Error: " + (job.error || "Failed") + "</div>";
+        console.error("❌ JOB FAILED:", job.error);
+        
+        const errorContainer = document.getElementById("error-container");
+        if (errorContainer) {
+          errorContainer.innerHTML = 
+            "<div class='error-message'>❌ Error: " + (job.error || "Unknown error") + "</div>";
+        }
+        return;
       }
+
     } catch (error) {
-      console.error(error);
+      console.error(`💥 Poll ${pollCount} Exception:`, error);
+      // Continue polling despite errors
     }
-  }, 500);  // Poll every 500ms for smoother updates
+  }, 500);  // Poll every 500ms for smooth updates
 }
 </script>
 </body>
