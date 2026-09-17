@@ -24,11 +24,31 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="NarrativeAI", version="0.3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-try:
-    polly = boto3.client('polly', region_name=os.getenv('AWS_REGION', 'us-east-1'))
-except Exception as e:
-    logger.warning(f"AWS Polly not available: {e}")
-    polly = None
+polly = None
+
+def get_polly_client():
+    """Initialize Polly client on-demand. Checks for credentials at runtime."""
+    global polly
+    
+    # If already initialized and working, return it
+    if polly is not None:
+        return polly
+    
+    # Try to initialize now (credentials might have been added after startup)
+    try:
+        aws_key = os.getenv('AWS_ACCESS_KEY_ID')
+        aws_secret = os.getenv('AWS_SECRET_ACCESS_KEY')
+        
+        if not aws_key or not aws_secret:
+            logger.error("❌ AWS credentials not configured: AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY missing")
+            return None
+        
+        polly = boto3.client('polly', region_name=os.getenv('AWS_REGION', 'us-east-1'))
+        logger.info("✅ AWS Polly client initialized successfully")
+        return polly
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize AWS Polly: {e}")
+        return None
 
 UPLOAD_DIR, OUTPUT_DIR = Path("uploads"), Path("output")
 JOBS_DB_FILE = Path("jobs_db.json")
@@ -78,7 +98,8 @@ class Health(BaseModel):
 
 @app.get("/health", response_model=Health)
 async def health():
-    return Health(status="healthy", version="0.3.0", aws_ok=bool(os.getenv('AWS_ACCESS_KEY_ID')))
+    polly_client = get_polly_client()
+    return Health(status="healthy", version="0.3.0", aws_ok=polly_client is not None)
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -308,7 +329,8 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
         logger.info(f"Job {jid}: Progress 20% - Extraction complete")
         
         audio_files = []
-        if polly:
+        polly_client = get_polly_client()
+        if polly_client:
             logger.info(f"🎤 AWS Polly available - synthesizing {len(segments)} segments")
             for idx, seg in enumerate(segments):
                 try:
@@ -324,7 +346,7 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                         text = text[:2900]
                     
                     # Use pre-computed ssml_text with prosody tags (CRITICAL: don't recreate plain SSML!)
-                    response = polly.synthesize_speech(Text=ssml_text, TextType="ssml", OutputFormat="mp3", VoiceId=voice, Engine="neural")
+                    response = polly_client.synthesize_speech(Text=ssml_text, TextType="ssml", OutputFormat="mp3", VoiceId=voice, Engine="neural")
                     audio_path = OUTPUT_DIR / f"{jid}_seg_{idx:06d}.mp3"
                     audio_path.write_bytes(response["AudioStream"].read())
                     audio_files.append(audio_path)
