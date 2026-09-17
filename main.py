@@ -1,4 +1,4 @@
-import os, logging, time, re, subprocess, asyncio, threading
+import os, logging, time, re, subprocess, asyncio, threading, json
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, HTMLResponse
@@ -22,10 +22,33 @@ except Exception as e:
     polly = None
 
 UPLOAD_DIR, OUTPUT_DIR = Path("uploads"), Path("output")
+JOBS_DB_FILE = Path("jobs_db.json")
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
-jobs = {}
+
 jobs_lock = threading.Lock()  # Thread-safe access to jobs dict
+
+def load_jobs_from_disk():
+    """Load jobs from persistent storage"""
+    if JOBS_DB_FILE.exists():
+        try:
+            with open(JOBS_DB_FILE, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Error loading jobs: {e}")
+    return {}
+
+def save_jobs_to_disk(jobs_data):
+    """Save jobs to persistent storage"""
+    try:
+        with open(JOBS_DB_FILE, 'w') as f:
+            json.dump(jobs_data, f)
+    except Exception as e:
+        logger.error(f"Error saving jobs: {e}")
+
+# Load existing jobs from disk at startup
+jobs = load_jobs_from_disk()
+logger.info(f"Loaded {len(jobs)} jobs from disk")
 
 VOICES = {"narrator": "Joanna", "male_1": "Matthew", "male_2": "Justin",
     "female_1": "Ivy", "female_2": "Salli", "old_male": "Gary", "child": "Kimberly"}
@@ -55,6 +78,7 @@ async def upload(bg: BackgroundTasks, file: UploadFile = File(...), multi_voice:
     (UPLOAD_DIR / f"{jid}.pdf").write_bytes(content)
     with jobs_lock:
         jobs[jid] = {"id": jid, "status": "pending", "file": file.filename, "progress": 0}
+        save_jobs_to_disk(jobs)  # Persist to disk
     logger.info(f"Job {jid} queued")
     bg.add_task(run_process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice)
     return {"job_id": jid, "status": "pending"}
@@ -114,6 +138,7 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
         with jobs_lock:
             jobs[jid]["status"] = "processing"
             jobs[jid]["progress"] = 5
+            save_jobs_to_disk(jobs)
         logger.info(f"Job {jid}: Progress 5% - Starting extraction")
         
         segments = extract_segments(path)
@@ -123,6 +148,7 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
         logger.info(f"Found {len(segments)} segments")
         with jobs_lock:
             jobs[jid]["progress"] = 20
+            save_jobs_to_disk(jobs)
         logger.info(f"Job {jid}: Progress 20% - Extraction complete")
         
         audio_files = []
@@ -141,6 +167,7 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                     progress = 20 + int((idx / len(segments)) * 65)
                     with jobs_lock:
                         jobs[jid]["progress"] = progress
+                        save_jobs_to_disk(jobs)
                     logger.info(f"Job {jid}: Progress {progress}% - Synthesized segment {idx + 1}/{len(segments)}")
                     
                     # Small delay to allow frontend to poll
@@ -151,6 +178,7 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
             
             with jobs_lock:
                 jobs[jid]["progress"] = 85
+                save_jobs_to_disk(jobs)
             logger.info(f"Job {jid}: Progress 85% - All segments synthesized")
             
             if audio_files:
@@ -162,6 +190,7 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                     
                     with jobs_lock:
                         jobs[jid]["progress"] = 90
+                        save_jobs_to_disk(jobs)
                     logger.info(f"Job {jid}: Progress 90% - Concatenating audio")
                     
                     output_path = OUTPUT_DIR / f"{jid}.mp3"
@@ -179,12 +208,14 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
         with jobs_lock:
             jobs[jid]["status"] = "completed"
             jobs[jid]["progress"] = 100
+            save_jobs_to_disk(jobs)
         logger.info(f"Job {jid}: Progress 100% - Completed")
     except Exception as e:
         logger.error(f"Error: {e}")
         with jobs_lock:
             jobs[jid]["status"] = "failed"
             jobs[jid]["error"] = str(e)
+            save_jobs_to_disk(jobs)
 
 def get_html_ui():
     return ""
