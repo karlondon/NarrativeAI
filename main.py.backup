@@ -1,7 +1,7 @@
-import os, logging, time, re, subprocess, asyncio, threading, json, uuid
+import os, logging, time, re, subprocess, asyncio, threading, json, uuid, hashlib
 from pathlib import Path
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import boto3
@@ -21,14 +21,40 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="NarrativeAI", version="0.3.0")
+app = FastAPI(title="NarrativeAI", version="0.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-try:
-    polly = boto3.client('polly', region_name=os.getenv('AWS_REGION', 'us-east-1'))
-except Exception as e:
-    logger.warning(f"AWS Polly not available: {e}")
-    polly = None
+# ===== FREEMIUM CONFIG =====
+FREE_CONVERSIONS_PER_DAY = 5
+DOWNLOAD_PRICE_GBP = 1.0
+SESSION_DB_FILE = Path("sessions_db.json")
+GOOGLE_ANALYTICS_ID = "G-XXXXXXXXXX"  # Replace with your GA ID
+
+polly = None
+
+def get_polly_client():
+    """Initialize Polly client on-demand. Checks for credentials at runtime."""
+    global polly
+    
+    # If already initialized and working, return it
+    if polly is not None:
+        return polly
+    
+    # Try to initialize now (credentials might have been added after startup)
+    try:
+        aws_key = os.getenv('AWS_ACCESS_KEY_ID')
+        aws_secret = os.getenv('AWS_SECRET_ACCESS_KEY')
+        
+        if not aws_key or not aws_secret:
+            logger.error("❌ AWS credentials not configured: AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY missing")
+            return None
+        
+        polly = boto3.client('polly', region_name=os.getenv('AWS_REGION', 'us-east-1'))
+        logger.info("✅ AWS Polly client initialized successfully")
+        return polly
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize AWS Polly: {e}")
+        return None
 
 UPLOAD_DIR, OUTPUT_DIR = Path("uploads"), Path("output")
 JOBS_DB_FILE = Path("jobs_db.json")
@@ -61,14 +87,70 @@ def save_jobs_to_disk(jobs_data):
 jobs = load_jobs_from_disk()
 logger.info(f"Loaded {len(jobs)} jobs from disk")
 
+# ===== FREEMIUM SESSION TRACKING =====
+sessions_lock = threading.Lock()
+
+def load_sessions_from_disk():
+    """Load session data from persistent storage"""
+    if SESSION_DB_FILE.exists():
+        try:
+            with open(SESSION_DB_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_sessions_to_disk(sessions_data):
+    """Save sessions to persistent storage"""
+    try:
+        with open(SESSION_DB_FILE, 'w') as f:
+            json.dump(sessions_data, f)
+    except Exception as e:
+        logger.error(f"Error saving sessions: {e}")
+
+sessions = load_sessions_from_disk()
+logger.info(f"✅ Loaded {len(sessions)} session records")
+
+def get_client_id(request: Request) -> str:
+    """Create unique ID from user's IP + User Agent"""
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "unknown")
+    raw = f"{client_ip}:{user_agent}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+def get_today() -> str:
+    """Get today's date (resets daily at midnight UTC)"""
+    return time.strftime("%Y-%m-%d", time.gmtime())
+
+def check_free_tier(user_id: str) -> tuple:
+    """Check if user has free conversions left. Returns (is_free, used, remaining)"""
+    today = get_today()
+    key = f"{user_id}:{today}"
+    
+    with sessions_lock:
+        used = sessions.get(key, 0)
+        remaining = max(0, FREE_CONVERSIONS_PER_DAY - used)
+        return remaining > 0, used, remaining
+
+def count_conversion(user_id: str):
+    """Increment user's daily conversion count"""
+    today = get_today()
+    key = f"{user_id}:{today}"
+    
+    with sessions_lock:
+        sessions[key] = sessions.get(key, 0) + 1
+        save_sessions_to_disk(sessions)
+        logger.info(f"✅ Conversion tracked for {user_id[:8]}... (total: {sessions[key]}/{FREE_CONVERSIONS_PER_DAY})")
+
+
 VOICES = {
-    "narrator": "Joanna",           # Female narrator - warm, engaging
-    "male_1": "Matthew",            # Male voice - strong, authoritative
-    "male_2": "Justin",             # Male voice - younger, friendly
-    "female_1": "Ivy",              # Female voice - energetic, young
-    "female_2": "Salli",            # Female voice - mature, professional
-    "old_male": "Gary",             # Male voice - older, wise
-    "child": "Kimberly"             # High-pitched for children
+    "narrator": "Joanna",           # Female narrator - warm, engaging, professional (Neural supported)
+    "male_1": "Matthew",            # Male voice - professional, clear (Neural supported)
+    "male_2": "Justin",             # Male voice - friendly, clear (Neural supported)
+    "female_1": "Ivy",              # Female voice - energetic, professional (Neural supported)
+    "female_2": "Salli",            # Female voice - mature, professional (Neural supported)
+    "old_male": "Brian",            # Male voice - distinguished, wise (Neural supported)
+    "child": "Kimberly"             # Female voice - younger (Neural supported)
 }
 
 class Health(BaseModel):
@@ -78,7 +160,8 @@ class Health(BaseModel):
 
 @app.get("/health", response_model=Health)
 async def health():
-    return Health(status="healthy", version="0.3.0", aws_ok=bool(os.getenv('AWS_ACCESS_KEY_ID')))
+    polly_client = get_polly_client()
+    return Health(status="healthy", version="0.3.0", aws_ok=polly_client is not None)
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -118,14 +201,21 @@ async def status(jid: str):
 @app.get("/jobs/{jid}/download")
 async def download(jid: str):
     if jid not in jobs or jobs[jid]['status'] != 'completed':
-        raise HTTPException(400, "not ready")
+        raise HTTPException(400, "Job not ready or not found")
+    
     f = OUTPUT_DIR / f"{jid}.mp3"
-    return FileResponse(f, filename=f"{jobs[jid]['file'].replace('.pdf','')}.mp3", media_type="audio/mpeg") if f.exists() else None
+    if not f.exists():
+        logger.error(f"❌ Download: Audio file not found: {f}")
+        raise HTTPException(404, f"Audio file not found for job {jid}")
+    
+    filename = f"{jobs[jid]['file'].replace('.pdf','')}.mp3"
+    logger.info(f"✅ Download: Sending {filename} ({f.stat().st_size / 1024 / 1024:.1f}MB)")
+    return FileResponse(f, filename=filename, media_type="audio/mpeg")
 
 def detect_speaker(text: str, segment_index: int = 0) -> tuple:
     """
     Advanced speaker detection with NLP analysis and character tracking.
-    Returns: (voice_id, ssml_text) tuple with SSML prosody tags for pitch and rate control
+    Returns: (voice_id, text) tuple
     
     Detection hierarchy:
     1. Character names (e.g., "John said") - consistent voice assignment
@@ -135,13 +225,16 @@ def detect_speaker(text: str, segment_index: int = 0) -> tuple:
     5. Exclamations (ends with !)
     6. Emotional tone analysis (sentiment polarity)
     7. Voice rotation for narrative variety
+    
+    OPTIMIZED FOR: Professional adult narration using Standard engine
+    - Professional voices: Joanna, Matthew, Justin, Ivy, Salli, Brian, Kimberly
+    - No SSML prosody (not supported in all AWS regions)
+    - Simple text delivery for maximum compatibility
     """
     global GLOBAL_CHARACTER_VOICES
     
     text_lower = text.lower()
     voice_id = "narrator"
-    pitch = "0%"
-    rate = "100%"
     
     # LEVEL 1: CHARACTER NAME DETECTION - assigns consistent voices to named characters
     char_pattern = r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+(?:said|asked|replied|exclaimed|shouted|whispered|muttered|hissed|bellowed|cried)'
@@ -150,14 +243,13 @@ def detect_speaker(text: str, segment_index: int = 0) -> tuple:
     if char_matches:
         char_name = char_matches[0]
         if char_name not in GLOBAL_CHARACTER_VOICES:
+            # Use only professional adult voices
             available_voices = ["male_1", "male_2", "female_1", "female_2", "old_male"]
             char_index = len(GLOBAL_CHARACTER_VOICES) % len(available_voices)
             GLOBAL_CHARACTER_VOICES[char_name] = available_voices[char_index]
             logger.info(f"🎭 NEW CHARACTER: '{char_name}' → {GLOBAL_CHARACTER_VOICES[char_name]}")
         
         voice_id = GLOBAL_CHARACTER_VOICES[char_name]
-        pitch = "+10%"
-        rate = "95%"
     
     # LEVEL 2: DIALOGUE DETECTION - Gender-aware dialogue handling
     elif re.search(r'"[^"]{10,}"', text):
@@ -167,26 +259,18 @@ def detect_speaker(text: str, segment_index: int = 0) -> tuple:
             voice_id = "female_2"
         else:
             voice_id = "male_1" if segment_index % 2 == 0 else "female_1"
-        pitch = "+15%"
-        rate = "95%"
     
     # LEVEL 3: SINGLE-QUOTED SPEECH
     elif re.search(r"'[^']{10,}'", text):
         voice_id = "female_1"
-        pitch = "+10%"
-        rate = "98%"
     
-    # LEVEL 4: QUESTIONS - faster delivery
+    # LEVEL 4: QUESTIONS
     elif text.strip().endswith('?'):
         voice_id = "female_2" if segment_index % 3 == 0 else "male_2"
-        pitch = "+8%"
-        rate = "115%"
     
-    # LEVEL 5: EXCLAMATIONS - energetic
+    # LEVEL 5: EXCLAMATIONS
     elif text.strip().endswith('!'):
         voice_id = "male_2" if segment_index % 2 == 0 else "female_1"
-        pitch = "+20%"
-        rate = "110%"
     
     # LEVEL 6: EMOTIONAL TONE DETECTION using TextBlob sentiment analysis
     else:
@@ -197,12 +281,8 @@ def detect_speaker(text: str, segment_index: int = 0) -> tuple:
                 
                 if polarity > 0.4:  # Happy/positive
                     voice_id = "female_1"
-                    pitch = "+15%"
-                    rate = "110%"
                 elif polarity < -0.4:  # Sad/negative
                     voice_id = "old_male"
-                    pitch = "-15%"
-                    rate = "85%"
                 else:  # Neutral
                     voice_rotation = ["narrator", "male_2", "male_1"]
                     voice_id = voice_rotation[segment_index % len(voice_rotation)]
@@ -215,13 +295,7 @@ def detect_speaker(text: str, segment_index: int = 0) -> tuple:
             voice_rotation = ["narrator", "male_2", "male_1"]
             voice_id = voice_rotation[segment_index % len(voice_rotation)]
     
-    # BUILD SSML TEXT WITH PROSODY TAGS
-    if pitch != "0%" or rate != "100%":
-        ssml_text = f'<speak><prosody pitch="{pitch}" rate="{rate}">{text}</prosody></speak>'
-    else:
-        ssml_text = f'<speak>{text}</speak>'
-    
-    return voice_id, ssml_text
+    return voice_id
 
 def extract_segments(pdf_path: Path) -> list:
     segments = []
@@ -235,12 +309,11 @@ def extract_segments(pdf_path: Path) -> list:
                     page_segments = 0
                     for para in text.split('\n\n'):
                         if para.strip():
-                            # detect_speaker now returns (voice_id, ssml_text) tuple
-                            voice_id, ssml_text = detect_speaker(para, segment_index)
+                            # detect_speaker now returns only voice_id
+                            voice_id = detect_speaker(para, segment_index)
                             segments.append({
                                 "text": para.strip(), 
                                 "voice_id": voice_id,
-                                "ssml_text": ssml_text,
                                 "page": page_num + 1
                             })
                             segment_index += 1
@@ -280,6 +353,8 @@ def run_process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
             save_jobs_to_disk(jobs)
 
 async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
+    global GLOBAL_CHARACTER_VOICES
+    GLOBAL_CHARACTER_VOICES = {}  # Reset character voices for each new PDF
     try:
         logger.info(f"Starting {jid}")
         with jobs_lock:
@@ -299,24 +374,43 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
         logger.info(f"Job {jid}: Progress 20% - Extraction complete")
         
         audio_files = []
-        if polly:
+        polly_client = get_polly_client()
+        if polly_client:
             logger.info(f"🎤 AWS Polly available - synthesizing {len(segments)} segments")
             for idx, seg in enumerate(segments):
                 try:
                     # Use the pre-computed voice_id and ssml_text from detect_speaker
                     voice_id = seg["voice_id"] if use_multi_voice else "narrator"
-                    ssml_text = seg["ssml_text"] if use_multi_voice else f'<speak>{seg["text"]}</speak>'
-                    voice = VOICES.get(voice_id, VOICES["narrator"])
                     text = seg["text"]
                     
-                    # AWS Polly limit is 3000 characters, use 2900 to be safe
-                    if len(text) > 2900:
-                        logger.warning(f"Segment {idx} too long ({len(text)} chars), truncating to 2900")
-                        text = text[:2900]
+                    # AWS Polly limit is 3000 characters for SSML
+                    # We use 2000 to be safe since SSML tags add overhead
+                    if len(text) > 2000:
+                        logger.warning(f"Segment {idx} too long ({len(text)} chars), truncating to 2000")
+                        text = text[:2000]
                     
-                    ssml = f'<speak>{text}</speak>'
-                    response = polly.synthesize_speech(Text=ssml, TextType="ssml", OutputFormat="mp3", VoiceId=voice, Engine="neural")
-                    audio_path = OUTPUT_DIR / f"{jid}_seg_{idx}.mp3"
+                    # Get the voice name
+                    voice = VOICES.get(voice_id, VOICES["narrator"])
+                    
+                    # For Standard engine: use plain text (no SSML prosody)
+                    # Standard engine is compatible with all voices in all AWS regions
+                    # Professional voices (Joanna, Matthew, etc.) already sound adult-like
+                    plain_text = text
+                    
+                    # Use STANDARD engine - compatible with all regions and voices
+                    # Professional voices provide:
+                    # - Natural, adult-sounding narration
+                    # - Clear enunciation
+                    # - Professional delivery
+                    response = polly_client.synthesize_speech(
+                        Text=plain_text, 
+                        TextType="text", 
+                        OutputFormat="mp3", 
+                        VoiceId=voice, 
+                        Engine="standard"  # Standard engine for wide compatibility
+                    )
+
+                    audio_path = OUTPUT_DIR / f"{jid}_seg_{idx:06d}.mp3"
                     audio_path.write_bytes(response["AudioStream"].read())
                     audio_files.append(audio_path)
                     
@@ -325,10 +419,10 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                     with jobs_lock:
                         jobs[jid]["progress"] = progress
                         save_jobs_to_disk(jobs)
-                    logger.info(f"Job {jid}: Progress {progress}% - Synthesized segment {idx + 1}/{len(segments)} ({len(text)} chars)")
+                    logger.info(f"Job {jid}: Progress {progress}% - Synthesized segment {idx + 1}/{len(segments)} with voice {voice} (Neural, 90% rate) ({len(text)} chars)")
                     
                     # Small delay to allow frontend to poll
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.05)
                 except Exception as e:
                     logger.error(f"❌ Segment {idx} error: {e}")
                     continue
@@ -337,70 +431,75 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                 jobs[jid]["progress"] = 85
                 save_jobs_to_disk(jobs)
             logger.info(f"Job {jid}: Progress 85% - All segments synthesized")
-            
-            if audio_files:
-                try:
-                    # FIX FOR 2-MINUTE AUDIO: Use absolute paths in concat file
-                    concat_file = OUTPUT_DIR / f"{jid}_concat.txt"
-                    with open(concat_file, "w") as f:
-                        for af in audio_files:
-                            abs_path = af.resolve()  # Convert to absolute path
-                            f.write(f"file '{abs_path}'\n")
-                    
-                    with jobs_lock:
-                        jobs[jid]["progress"] = 90
-                        save_jobs_to_disk(jobs)
-                    logger.info(f"Job {jid}: Progress 90% - Concatenating {len(audio_files)} audio segments")
-                    
-                    output_path = OUTPUT_DIR / f"{jid}.mp3"
-                    
-                    # Improved FFmpeg command with proper error checking
-                    cmd = [
-                        "ffmpeg", 
-                        "-f", "concat", 
-                        "-safe", "0", 
-                        "-i", str(concat_file), 
-                        "-c", "copy",
-                        "-q:a", "0",
-                        "-y", 
-                        str(output_path)
-                    ]
-                    
-                    result = subprocess.run(cmd, capture_output=True, timeout=600, text=True)
-                    
-                    # Check for FFmpeg errors
-                    if result.returncode != 0:
-                        logger.error(f"❌ FFmpeg concat error:\n{result.stderr}")
-                        raise Exception(f"FFmpeg failed: {result.stderr[-500:]}")
-                    
-                    # Verify output file exists and has content
-                    if not output_path.exists():
-                        logger.error(f"❌ FFmpeg did not create output file")
-                        raise Exception("FFmpeg did not create output file")
-                    
-                    output_size = output_path.stat().st_size
-                    size_mb = output_size / 1024 / 1024
-                    logger.info(f"✅ Successfully concatenated to {output_path.name} ({size_mb:.1f}MB, {len(audio_files)} segments)")
-                    
-                    # Cleanup temporary files
-                    concat_file.unlink(missing_ok=True)
-                    for af in audio_files:
-                        af.unlink(missing_ok=True)
-                    
-                except subprocess.TimeoutExpired:
-                    logger.error(f"❌ FFmpeg concatenation timed out (600s) - file too large")
-                    raise Exception("Concatenation timeout - file too large")
-                except Exception as e:
-                    logger.error(f"❌ Concatenation failed: {e}")
-                    # Fallback: use first audio file if concat fails
-                    if audio_files:
-                        logger.info(f"⚠️ Falling back to first audio segment only")
-                        audio_files[0].rename(OUTPUT_DIR / f"{jid}.mp3")
-                        for af in audio_files[1:]:
-                            af.unlink(missing_ok=True)
-                    else:
-                        raise
+        else:
+            logger.error(f"❌ AWS Polly not available - cannot synthesize audio. Check AWS credentials.")
+            raise Exception("AWS Polly not configured - check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
 
+        # Verify we have audio files to concatenate
+        if not audio_files:
+            logger.error(f"❌ No audio files were created during synthesis")
+            raise Exception("Audio synthesis failed - no audio files generated")
+
+        # Concatenate all audio segments into final MP3
+        try:
+            # FIX FOR 2-MINUTE AUDIO: Use absolute paths in concat file
+            concat_file = OUTPUT_DIR / f"{jid}_concat.txt"
+            with open(concat_file, "w") as f:
+                for af in audio_files:
+                    abs_path = af.resolve()  # Convert to absolute path
+                    f.write(f"file '{abs_path}'\n")
+            
+            with jobs_lock:
+                jobs[jid]["progress"] = 90
+                save_jobs_to_disk(jobs)
+            logger.info(f"Job {jid}: Progress 90% - Concatenating {len(audio_files)} audio segments")
+            
+            output_path = OUTPUT_DIR / f"{jid}.mp3"
+            
+            # Improved FFmpeg command with proper error checking
+            cmd = [
+                "ffmpeg", 
+                "-f", "concat", 
+                "-safe", "0", 
+                "-i", str(concat_file), 
+                "-c", "copy",
+                "-q:a", "0",
+                "-y", 
+                str(output_path)
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, timeout=600, text=True)
+            
+            # Check for FFmpeg errors
+            if result.returncode != 0:
+                logger.error(f"❌ FFmpeg concat error:\n{result.stderr}")
+                raise Exception(f"FFmpeg failed: {result.stderr[-500:]}")
+            
+            # Verify output file exists and has content
+            if not output_path.exists():
+                logger.error(f"❌ FFmpeg did not create output file")
+                raise Exception("FFmpeg did not create output file")
+            
+            output_size = output_path.stat().st_size
+            size_mb = output_size / 1024 / 1024
+            logger.info(f"✅ Successfully concatenated to {output_path.name} ({size_mb:.1f}MB, {len(audio_files)} segments)")
+            
+            # Cleanup temporary files
+            concat_file.unlink(missing_ok=True)
+            for af in audio_files:
+                af.unlink(missing_ok=True)
+            
+        except subprocess.TimeoutExpired:
+            logger.error(f"❌ FFmpeg concatenation timed out (600s) - file too large")
+            raise Exception("Concatenation timeout - file too large")
+        except Exception as e:
+            logger.error(f"❌ Concatenation failed: {e}")
+            # Fallback: use first audio file if concat fails
+            if audio_files:
+                logger.info(f"⚠️ Falling back to first audio segment only")
+                audio_files[0].rename(OUTPUT_DIR / f"{jid}.mp3")
+                for af in audio_files[1:]:
+                    af.unlink(missing_ok=True)
         
         with jobs_lock:
             jobs[jid]["status"] = "completed"

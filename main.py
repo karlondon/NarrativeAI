@@ -1,7 +1,7 @@
-import os, logging, time, re, subprocess, asyncio, threading, json, uuid
+import os, logging, time, re, subprocess, asyncio, threading, json, uuid, hashlib
 from pathlib import Path
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import boto3
@@ -21,8 +21,14 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="NarrativeAI", version="0.3.0")
+app = FastAPI(title="NarrativeAI", version="0.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# ===== FREEMIUM CONFIG =====
+FREE_CONVERSIONS_PER_DAY = 5
+DOWNLOAD_PRICE_GBP = 1.0
+SESSION_DB_FILE = Path("sessions_db.json")
+GOOGLE_ANALYTICS_ID = "G-XXXXXXXXXX"  # Replace with your GA ID
 
 polly = None
 
@@ -80,6 +86,62 @@ def save_jobs_to_disk(jobs_data):
 # Load existing jobs from disk at startup
 jobs = load_jobs_from_disk()
 logger.info(f"Loaded {len(jobs)} jobs from disk")
+
+# ===== FREEMIUM SESSION TRACKING =====
+sessions_lock = threading.Lock()
+
+def load_sessions_from_disk():
+    """Load session data from persistent storage"""
+    if SESSION_DB_FILE.exists():
+        try:
+            with open(SESSION_DB_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_sessions_to_disk(sessions_data):
+    """Save sessions to persistent storage"""
+    try:
+        with open(SESSION_DB_FILE, 'w') as f:
+            json.dump(sessions_data, f)
+    except Exception as e:
+        logger.error(f"Error saving sessions: {e}")
+
+sessions = load_sessions_from_disk()
+logger.info(f"✅ Loaded {len(sessions)} session records")
+
+def get_client_id(request: Request) -> str:
+    """Create unique ID from user's IP + User Agent"""
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "unknown")
+    raw = f"{client_ip}:{user_agent}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+def get_today() -> str:
+    """Get today's date (resets daily at midnight UTC)"""
+    return time.strftime("%Y-%m-%d", time.gmtime())
+
+def check_free_tier(user_id: str) -> tuple:
+    """Check if user has free conversions left. Returns (is_free, used, remaining)"""
+    today = get_today()
+    key = f"{user_id}:{today}"
+    
+    with sessions_lock:
+        used = sessions.get(key, 0)
+        remaining = max(0, FREE_CONVERSIONS_PER_DAY - used)
+        return remaining > 0, used, remaining
+
+def count_conversion(user_id: str):
+    """Increment user's daily conversion count"""
+    today = get_today()
+    key = f"{user_id}:{today}"
+    
+    with sessions_lock:
+        sessions[key] = sessions.get(key, 0) + 1
+        save_sessions_to_disk(sessions)
+        logger.info(f"✅ Conversion tracked for {user_id[:8]}... (total: {sessions[key]}/{FREE_CONVERSIONS_PER_DAY})")
+
 
 VOICES = {
     "narrator": "Joanna",           # Female narrator - warm, engaging, professional (Neural supported)
