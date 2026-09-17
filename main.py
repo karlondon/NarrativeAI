@@ -62,7 +62,13 @@ async def upload(bg: BackgroundTasks, file: UploadFile = File(...), multi_voice:
 @app.get("/jobs/{jid}")
 async def status(jid: str):
     with jobs_lock:
-        return jobs.get(jid, {"error": "not found"})
+        job = jobs.get(jid)
+        if job:
+            logger.info(f"Status check for {jid}: {job}")
+            return job
+        else:
+            logger.info(f"Job not found: {jid}. Available jobs: {list(jobs.keys())}")
+            return {"error": "not found", "jid": jid, "available_jobs": list(jobs.keys())}
 
 @app.get("/jobs/{jid}/download")
 async def download(jid: str):
