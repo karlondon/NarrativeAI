@@ -60,6 +60,57 @@ VOICES = {
     "child": "Kimberly"             # High-pitched for children
 }
 
+class Health(BaseModel):
+    status: str
+    version: str
+    aws_ok: bool
+
+@app.get("/health", response_model=Health)
+async def health():
+    return Health(status="healthy", version="0.2.0", aws_ok=bool(os.getenv('AWS_ACCESS_KEY_ID')))
+
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    ui_path = Path(__file__).parent / "ui.html"
+    return ui_path.read_text() if ui_path.exists() else get_html_ui()
+
+@app.post("/upload")
+async def upload(bg: BackgroundTasks, file: UploadFile = File(...), multi_voice: bool = True):
+    if not file.filename.endswith('.pdf'):
+        raise HTTPException(400, "Only PDF files are supported")
+    content = await file.read()
+    if len(content) > 50*1024*1024:
+        raise HTTPException(413, "File too large")
+    # Create job ID with just timestamp + random suffix (avoid filename issues)
+    import uuid
+    jid = f"job_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    pdf_filename = file.filename.replace('.pdf', '')
+    (UPLOAD_DIR / f"{jid}.pdf").write_bytes(content)
+    with jobs_lock:
+        jobs[jid] = {"id": jid, "status": "pending", "file": file.filename, "filename": pdf_filename, "progress": 0}
+        save_jobs_to_disk(jobs)  # Persist to disk
+    logger.info(f"✅ Job {jid} created for file: {file.filename}")
+    bg.add_task(run_process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice)
+    return {"job_id": jid, "status": "pending"}
+
+@app.get("/jobs/{jid}")
+async def status(jid: str):
+    with jobs_lock:
+        job = jobs.get(jid)
+        if job:
+            logger.info(f"Status check for {jid}: {job}")
+            return job
+        else:
+            logger.info(f"Job not found: {jid}. Available jobs: {list(jobs.keys())}")
+            return {"error": "not found", "jid": jid, "available_jobs": list(jobs.keys())}
+
+@app.get("/jobs/{jid}/download")
+async def download(jid: str):
+    if jid not in jobs or jobs[jid]['status'] != 'completed':
+        raise HTTPException(400, "not ready")
+    f = OUTPUT_DIR / f"{jid}.mp3"
+    return FileResponse(f, filename=f"{jobs[jid]['file'].replace('.pdf','')}.mp3", media_type="audio/mpeg") if f.exists() else None
+
 def detect_speaker(text: str, segment_index: int = 0) -> str:
     """Detect appropriate speaker voice based on text content and variation"""
     text_lower = text.lower()
