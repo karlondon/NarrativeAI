@@ -115,14 +115,19 @@ def extract_segments(pdf_path: Path) -> list:
     segments = []
     try:
         with pdfplumber.open(pdf_path) as pdf:
+            logger.info(f"📖 Opening PDF: {pdf_path}, Pages: {len(pdf.pages)}")
             for page_num, page in enumerate(pdf.pages):
                 text = page.extract_text()
                 if text:
+                    page_segments = 0
                     for para in text.split('\n\n'):
                         if para.strip():
                             segments.append({"text": para.strip(), "speaker": detect_speaker(para), "page": page_num + 1})
+                            page_segments += 1
+                    logger.info(f"Page {page_num + 1}: Extracted {page_segments} paragraphs")
+            logger.info(f"✅ Total segments extracted: {len(segments)}")
     except Exception as e:
-        logger.error(f"Error: {e}")
+        logger.error(f"❌ PDF extraction error: {e}", exc_info=True)
         raise
     return segments
 
@@ -174,10 +179,17 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
         
         audio_files = []
         if polly:
+            logger.info(f"🎤 AWS Polly available - synthesizing {len(segments)} segments")
             for idx, seg in enumerate(segments):
                 try:
                     voice = VOICES.get(seg["speaker"], VOICES["narrator"]) if use_multi_voice else VOICES["narrator"]
-                    text = seg["text"][:500]
+                    text = seg["text"]
+                    
+                    # AWS Polly limit is 3000 characters, use 2900 to be safe
+                    if len(text) > 2900:
+                        logger.warning(f"Segment {idx} too long ({len(text)} chars), truncating to 2900")
+                        text = text[:2900]
+                    
                     ssml = f'<speak>{text}</speak>'
                     response = polly.synthesize_speech(Text=ssml, TextType="ssml", OutputFormat="mp3", VoiceId=voice, Engine="neural")
                     audio_path = OUTPUT_DIR / f"{jid}_seg_{idx}.mp3"
@@ -189,12 +201,12 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                     with jobs_lock:
                         jobs[jid]["progress"] = progress
                         save_jobs_to_disk(jobs)
-                    logger.info(f"Job {jid}: Progress {progress}% - Synthesized segment {idx + 1}/{len(segments)}")
+                    logger.info(f"Job {jid}: Progress {progress}% - Synthesized segment {idx + 1}/{len(segments)} ({len(text)} chars)")
                     
                     # Small delay to allow frontend to poll
                     await asyncio.sleep(0.1)
                 except Exception as e:
-                    logger.error(f"Segment error: {e}")
+                    logger.error(f"❌ Segment {idx} error: {e}")
                     continue
             
             with jobs_lock:
