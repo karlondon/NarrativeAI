@@ -46,20 +46,36 @@ jobs:
           echo "$LIGHTSAIL_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H $LIGHTSAIL_HOST >> ~/.ssh/known_hosts
+          
+          # Create a temporary file with AWS credentials
+          cat > /tmp/aws_creds.txt << EOF
+          AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+          AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+          AWS_REGION=us-east-1
+          EOF
+          
+          # Copy credentials to server and deploy
           ssh -i ~/.ssh/id_rsa $LIGHTSAIL_USER@$LIGHTSAIL_HOST << 'DEPLOY'
             cd /home/ubuntu/NarrativeAI
             git pull origin main
             source venv/bin/activate
             pip install -r requirements.txt
-            # Create .env file with AWS credentials
-            echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" > .env
-            echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" >> .env
-            echo "AWS_REGION=us-east-1" >> .env
-            chmod 600 .env
-            cat .env
             sudo systemctl restart narrativeai
             echo "✅ Deployment successful!"
           DEPLOY
+          
+          # Now copy the .env file to the server
+          scp -i ~/.ssh/id_rsa /tmp/aws_creds.txt $LIGHTSAIL_USER@$LIGHTSAIL_HOST:/tmp/aws_creds.txt
+          
+          # Copy it to the app directory with proper permissions
+          ssh -i ~/.ssh/id_rsa $LIGHTSAIL_USER@$LIGHTSAIL_HOST << 'SETENV'
+            sudo cp /tmp/aws_creds.txt /home/ubuntu/NarrativeAI/.env
+            sudo chown ubuntu:ubuntu /home/ubuntu/NarrativeAI/.env
+            chmod 600 /home/ubuntu/NarrativeAI/.env
+            cat /home/ubuntu/NarrativeAI/.env
+            sudo systemctl restart narrativeai
+            echo "✅ AWS credentials configured and service restarted!"
+          SETENV
       
       - name: Verify deployment
         run: |
