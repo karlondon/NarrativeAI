@@ -153,7 +153,7 @@ async def download(jid: str):
 def detect_speaker(text: str, segment_index: int = 0) -> tuple:
     """
     Advanced speaker detection with NLP analysis and character tracking.
-    Returns: (voice_id, ssml_text) tuple with SSML prosody tags for pitch and rate control
+    Returns: (voice_id, text) tuple
     
     Detection hierarchy:
     1. Character names (e.g., "John said") - consistent voice assignment
@@ -164,17 +164,15 @@ def detect_speaker(text: str, segment_index: int = 0) -> tuple:
     6. Emotional tone analysis (sentiment polarity)
     7. Voice rotation for narrative variety
     
-    OPTIMIZED FOR: Professional adult narration with clear enunciation
-    - All rates set to 85-95% (slower for clarity, adult-like pace)
-    - Neural engine will handle prosody naturally
-    - Professional voice selection only
+    OPTIMIZED FOR: Professional adult narration using Standard engine
+    - Professional voices: Joanna, Matthew, Justin, Ivy, Salli, Brian, Kimberly
+    - No SSML prosody (not supported in all AWS regions)
+    - Simple text delivery for maximum compatibility
     """
     global GLOBAL_CHARACTER_VOICES
     
     text_lower = text.lower()
     voice_id = "narrator"
-    pitch = "0%"
-    rate = "90%"  # Default to 90% (slightly slower for clarity)
     
     # LEVEL 1: CHARACTER NAME DETECTION - assigns consistent voices to named characters
     char_pattern = r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)\s+(?:said|asked|replied|exclaimed|shouted|whispered|muttered|hissed|bellowed|cried)'
@@ -190,8 +188,6 @@ def detect_speaker(text: str, segment_index: int = 0) -> tuple:
             logger.info(f"🎭 NEW CHARACTER: '{char_name}' → {GLOBAL_CHARACTER_VOICES[char_name]}")
         
         voice_id = GLOBAL_CHARACTER_VOICES[char_name]
-        pitch = "+5%"  # Subtle pitch increase for dialogue
-        rate = "88%"   # Slightly slower for clear dialogue
     
     # LEVEL 2: DIALOGUE DETECTION - Gender-aware dialogue handling
     elif re.search(r'"[^"]{10,}"', text):
@@ -201,26 +197,18 @@ def detect_speaker(text: str, segment_index: int = 0) -> tuple:
             voice_id = "female_2"
         else:
             voice_id = "male_1" if segment_index % 2 == 0 else "female_1"
-        pitch = "+3%"   # Very subtle pitch for natural dialogue
-        rate = "88%"    # Clear dialogue delivery
     
     # LEVEL 3: SINGLE-QUOTED SPEECH
     elif re.search(r"'[^']{10,}'", text):
         voice_id = "female_1"
-        pitch = "+3%"
-        rate = "88%"
     
-    # LEVEL 4: QUESTIONS - slightly faster but still clear
+    # LEVEL 4: QUESTIONS
     elif text.strip().endswith('?'):
         voice_id = "female_2" if segment_index % 3 == 0 else "male_2"
-        pitch = "+2%"
-        rate = "90%"   # Slightly faster than narrative
     
-    # LEVEL 5: EXCLAMATIONS - energetic but professional
+    # LEVEL 5: EXCLAMATIONS
     elif text.strip().endswith('!'):
         voice_id = "male_2" if segment_index % 2 == 0 else "female_1"
-        pitch = "+5%"
-        rate = "92%"   # Energetic but still clear
     
     # LEVEL 6: EMOTIONAL TONE DETECTION using TextBlob sentiment analysis
     else:
@@ -229,40 +217,23 @@ def detect_speaker(text: str, segment_index: int = 0) -> tuple:
                 blob = TextBlob(text[:500])
                 polarity = blob.sentiment.polarity
                 
-                if polarity > 0.4:  # Happy/positive - slightly faster and higher pitch
+                if polarity > 0.4:  # Happy/positive
                     voice_id = "female_1"
-                    pitch = "+5%"
-                    rate = "92%"
-                elif polarity < -0.4:  # Sad/negative - slower and deeper
+                elif polarity < -0.4:  # Sad/negative
                     voice_id = "old_male"
-                    pitch = "-5%"
-                    rate = "85%"  # Slowest for emotional impact
-                else:  # Neutral - balanced narrator pace
+                else:  # Neutral
                     voice_rotation = ["narrator", "male_2", "male_1"]
                     voice_id = voice_rotation[segment_index % len(voice_rotation)]
-                    pitch = "0%"
-                    rate = "90%"  # Standard pace
             else:
                 # LEVEL 7: FALLBACK - Voice rotation
                 voice_rotation = ["narrator", "male_2", "male_1"]
                 voice_id = voice_rotation[segment_index % len(voice_rotation)]
-                pitch = "0%"
-                rate = "90%"
         except Exception as e:
             logger.debug(f"Sentiment analysis failed: {e}")
             voice_rotation = ["narrator", "male_2", "male_1"]
             voice_id = voice_rotation[segment_index % len(voice_rotation)]
-            pitch = "0%"
-            rate = "90%"
     
-    # BUILD SSML TEXT WITH PROSODY TAGS (Neural engine will handle naturally)
-    # Note: These tags work with Neural engine for subtle, professional delivery
-    if pitch != "0%" or rate != "90%":
-        ssml_text = f'<speak><prosody pitch="{pitch}" rate="{rate}">{text}</prosody></speak>'
-    else:
-        ssml_text = f'<speak>{text}</speak>'
-    
-    return voice_id, ssml_text
+    return voice_id
 
 def extract_segments(pdf_path: Path) -> list:
     segments = []
@@ -276,12 +247,11 @@ def extract_segments(pdf_path: Path) -> list:
                     page_segments = 0
                     for para in text.split('\n\n'):
                         if para.strip():
-                            # detect_speaker now returns (voice_id, ssml_text) tuple
-                            voice_id, ssml_text = detect_speaker(para, segment_index)
+                            # detect_speaker now returns only voice_id
+                            voice_id = detect_speaker(para, segment_index)
                             segments.append({
                                 "text": para.strip(), 
                                 "voice_id": voice_id,
-                                "ssml_text": ssml_text,
                                 "page": page_num + 1
                             })
                             segment_index += 1
@@ -360,28 +330,22 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                     # Get the voice name
                     voice = VOICES.get(voice_id, VOICES["narrator"])
                     
-                    # Create SSML with prosody tags for better clarity and adult-like quality
-                    # Neural engine supports prosody tags but NOT amazon:auto-breaths
-                    # Rate: 90% = slightly slower for clarity
-                    # Pitch: 0% = neutral (default)
-                    ssml_text = f'''<speak>
-                        <prosody rate="90%" pitch="0%">
-                            {text}
-                        </prosody>
-                    </speak>'''
+                    # For Standard engine: use plain text (no SSML prosody)
+                    # Standard engine is compatible with all voices in all AWS regions
+                    # Professional voices (Joanna, Matthew, etc.) already sound adult-like
+                    plain_text = text
                     
-                    # Use NEURAL engine for natural, human-like quality
-                    # Neural engine provides:
-                    # - Natural prosody (pitch, rhythm, intonation)
-                    # - Better emotional expression
-                    # - Clearer enunciation
-                    # - More adult-sounding voices
+                    # Use STANDARD engine - compatible with all regions and voices
+                    # Professional voices provide:
+                    # - Natural, adult-sounding narration
+                    # - Clear enunciation
+                    # - Professional delivery
                     response = polly_client.synthesize_speech(
-                        Text=ssml_text, 
-                        TextType="ssml", 
+                        Text=plain_text, 
+                        TextType="text", 
                         OutputFormat="mp3", 
                         VoiceId=voice, 
-                        Engine="neural"  # Switched to neural for professional quality
+                        Engine="standard"  # Standard engine for wide compatibility
                     )
 
                     audio_path = OUTPUT_DIR / f"{jid}_seg_{idx:06d}.mp3"
