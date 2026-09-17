@@ -391,68 +391,66 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
             logger.error(f"❌ No audio files were created during synthesis")
             raise Exception("Audio synthesis failed - no audio files generated")
 
-
+        # Concatenate all audio segments into final MP3
+        try:
+            # FIX FOR 2-MINUTE AUDIO: Use absolute paths in concat file
+            concat_file = OUTPUT_DIR / f"{jid}_concat.txt"
+            with open(concat_file, "w") as f:
+                for af in audio_files:
+                    abs_path = af.resolve()  # Convert to absolute path
+                    f.write(f"file '{abs_path}'\n")
             
+            with jobs_lock:
+                jobs[jid]["progress"] = 90
+                save_jobs_to_disk(jobs)
+            logger.info(f"Job {jid}: Progress 90% - Concatenating {len(audio_files)} audio segments")
+            
+            output_path = OUTPUT_DIR / f"{jid}.mp3"
+            
+            # Improved FFmpeg command with proper error checking
+            cmd = [
+                "ffmpeg", 
+                "-f", "concat", 
+                "-safe", "0", 
+                "-i", str(concat_file), 
+                "-c", "copy",
+                "-q:a", "0",
+                "-y", 
+                str(output_path)
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, timeout=600, text=True)
+            
+            # Check for FFmpeg errors
+            if result.returncode != 0:
+                logger.error(f"❌ FFmpeg concat error:\n{result.stderr}")
+                raise Exception(f"FFmpeg failed: {result.stderr[-500:]}")
+            
+            # Verify output file exists and has content
+            if not output_path.exists():
+                logger.error(f"❌ FFmpeg did not create output file")
+                raise Exception("FFmpeg did not create output file")
+            
+            output_size = output_path.stat().st_size
+            size_mb = output_size / 1024 / 1024
+            logger.info(f"✅ Successfully concatenated to {output_path.name} ({size_mb:.1f}MB, {len(audio_files)} segments)")
+            
+            # Cleanup temporary files
+            concat_file.unlink(missing_ok=True)
+            for af in audio_files:
+                af.unlink(missing_ok=True)
+            
+        except subprocess.TimeoutExpired:
+            logger.error(f"❌ FFmpeg concatenation timed out (600s) - file too large")
+            raise Exception("Concatenation timeout - file too large")
+        except Exception as e:
+            logger.error(f"❌ Concatenation failed: {e}")
+            # Fallback: use first audio file if concat fails
             if audio_files:
-                try:
-                    # FIX FOR 2-MINUTE AUDIO: Use absolute paths in concat file
-                    concat_file = OUTPUT_DIR / f"{jid}_concat.txt"
-                    with open(concat_file, "w") as f:
-                        for af in audio_files:
-                            abs_path = af.resolve()  # Convert to absolute path
-                            f.write(f"file '{abs_path}'\n")
-                    
-                    with jobs_lock:
-                        jobs[jid]["progress"] = 90
-                        save_jobs_to_disk(jobs)
-                    logger.info(f"Job {jid}: Progress 90% - Concatenating {len(audio_files)} audio segments")
-                    
-                    output_path = OUTPUT_DIR / f"{jid}.mp3"
-                    
-                    # Improved FFmpeg command with proper error checking
-                    cmd = [
-                        "ffmpeg", 
-                        "-f", "concat", 
-                        "-safe", "0", 
-                        "-i", str(concat_file), 
-                        "-c", "copy",
-                        "-q:a", "0",
-                        "-y", 
-                        str(output_path)
-                    ]
-                    
-                    result = subprocess.run(cmd, capture_output=True, timeout=600, text=True)
-                    
-                    # Check for FFmpeg errors
-                    if result.returncode != 0:
-                        logger.error(f"❌ FFmpeg concat error:\n{result.stderr}")
-                        raise Exception(f"FFmpeg failed: {result.stderr[-500:]}")
-                    
-                    # Verify output file exists and has content
-                    if not output_path.exists():
-                        logger.error(f"❌ FFmpeg did not create output file")
-                        raise Exception("FFmpeg did not create output file")
-                    
-                    output_size = output_path.stat().st_size
-                    size_mb = output_size / 1024 / 1024
-                    logger.info(f"✅ Successfully concatenated to {output_path.name} ({size_mb:.1f}MB, {len(audio_files)} segments)")
-                    
-                    # Cleanup temporary files
-                    concat_file.unlink(missing_ok=True)
-                    for af in audio_files:
-                        af.unlink(missing_ok=True)
-                    
-                except subprocess.TimeoutExpired:
-                    logger.error(f"❌ FFmpeg concatenation timed out (600s) - file too large")
-                    raise Exception("Concatenation timeout - file too large")
-                except Exception as e:
-                    logger.error(f"❌ Concatenation failed: {e}")
-                    # Fallback: use first audio file if concat fails
-                    if audio_files:
-                        logger.info(f"⚠️ Falling back to first audio segment only")
-                        audio_files[0].rename(OUTPUT_DIR / f"{jid}.mp3")
-                        for af in audio_files[1:]:
-                            af.unlink(missing_ok=True)
+                logger.info(f"⚠️ Falling back to first audio segment only")
+                audio_files[0].rename(OUTPUT_DIR / f"{jid}.mp3")
+                for af in audio_files[1:]:
+                    af.unlink(missing_ok=True)
                     else:
                         raise
 
