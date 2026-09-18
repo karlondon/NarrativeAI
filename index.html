@@ -228,26 +228,42 @@
             try { 
                 const r = await fetch("/upload", { method: "POST", body: d }); 
                 const a = await r.json(); 
-                console.log("Response:", a); 
+                console.log("🎯 FULL RESPONSE FROM SERVER:", JSON.stringify(a, null, 2)); 
                 console.log("Tier received from backend:", a.tier);
                 console.log("Include video:", a.include_video);
+                console.log("Response OK:", r.ok);
                 
                 if (r.ok) { 
-                    currentJobId = a.job_id; 
+                    currentJobId = a.job_id;
+                    console.log("✅ Job ID set to:", currentJobId);
                     document.getElementById("download-section").classList.add("active"); 
                     
                     // Make sure video status is visible if video is enabled
+                    console.log("🎬 Checking if video should be enabled...");
+                    console.log("   - a.include_video value:", a.include_video);
+                    console.log("   - typeof a.include_video:", typeof a.include_video);
+                    
                     if (a.include_video) {
-                        console.log("Video enabled - showing video status section");
-                        document.getElementById("video-status").classList.add("active");
-                        document.getElementById("video-download-btn").style.display = "block";
+                        console.log("✅ Video ENABLED - showing video status section");
+                        const videoStatusDiv = document.getElementById("video-status");
+                        const videoDownloadBtn = document.getElementById("video-download-btn");
+                        console.log("   - video-status element:", videoStatusDiv);
+                        console.log("   - video-download-btn element:", videoDownloadBtn);
+                        videoStatusDiv.classList.add("active");
+                        videoDownloadBtn.style.display = "block";
+                        console.log("   - video-status classes after add:", videoStatusDiv.className);
+                        console.log("   - video-download-btn display:", videoDownloadBtn.style.display);
+                    } else {
+                        console.log("❌ Video DISABLED - include_video is false");
                     }
                     
                     pollJobStatus(currentJobId); 
                     
                     if (a.include_video) {
-                        console.log("Starting video polling");
+                        console.log("🎬 Starting video polling");
                         startVideoPolling(currentJobId); 
+                    } else {
+                        console.log("❌ Skipping video polling - video not enabled");
                     }
                 } else { 
                     alert("Error"); 
@@ -256,6 +272,7 @@
                 } 
             } catch (e) { 
                 alert("Error: " + e.message); 
+                console.error("❌ Exception in handleConvert:", e);
                 b.disabled = false; 
                 b.textContent = "🚀 Convert"; 
             } 
