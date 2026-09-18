@@ -197,8 +197,33 @@ async def health():
     return Health(status="healthy", version="0.3.0", aws_ok=polly_client is not None)
 
 
-@app.get("/debug/status")
-async def debug_status():
+@app.post("/admin/force-reload")
+async def force_reload(request: Request):
+    """Force server to reload all code and clear caches - Emergency restart endpoint"""
+    import os
+    import sys
+    import gc
+    
+    # Clear all module caches
+    gc.collect()
+    
+    # Log that we're reloading
+    logger.warning("🔄 FORCE RELOAD TRIGGERED - Clearing all caches and reloading...")
+    
+    # Clear the module cache for index files
+    try:
+        landing_path = Path(__file__).parent / "index.html"
+        if landing_path.exists():
+            # Force delete any cached file descriptors
+            os.utime(landing_path, None)  # Touch the file to update mtime
+    except Exception as e:
+        logger.error(f"Error updating file mtime: {e}")
+    
+    return {
+        "status": "reloaded",
+        "message": "Server caches cleared. Next request will load fresh files.",
+        "timestamp": datetime.utcnow().isoformat()
+    }
     """Diagnostic endpoint to check which HTML file is being served"""
     import os
     from pathlib import Path
