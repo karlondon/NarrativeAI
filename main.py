@@ -3,7 +3,7 @@ from d_id_client import get_did_client
 from pricing_config import is_valid_tier, get_tier_info
 from datetime import datetime
 from pathlib import Path
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request, Form
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -387,26 +387,59 @@ async def root():
         return get_html_ui()
 
 @app.post("/upload")
-async def upload(bg: BackgroundTasks, file: UploadFile = File(...), multi_voice: bool = True, tier: str = "audio_only"):
+async def upload(
+    bg: BackgroundTasks, 
+    request: Request,
+    file: UploadFile = File(...),
+):
     """Upload PDF and start conversion with pricing tier support"""
+    # Get form data from multipart request
+    form_data = await request.form()
+    
+    # Log all form fields
+    logger.info(f"📥 UPLOAD REQUEST RECEIVED")
+    logger.info(f"   All form fields: {dict(form_data)}")
+    logger.info(f"   Form keys: {list(form_data.keys())}")
+    
+    # Extract parameters from form data
+    tier = form_data.get("tier", "audio_only")
+    voice = form_data.get("voice", "Joanna")
+    multi_voice_str = form_data.get("multi_voice", "true")
+    
+    logger.info(f"   tier raw: {repr(tier)} (type: {type(tier).__name__})")
+    logger.info(f"   voice raw: {repr(voice)}")
+    logger.info(f"   multi_voice raw: {repr(multi_voice_str)}")
+    
+    # Parse multi_voice
+    multi_voice = str(multi_voice_str).lower() == "true" if multi_voice_str else True
+    
+    # Clean up tier value
+    if isinstance(tier, str):
+        tier = tier.strip()
+    if not tier:
+        tier = "audio_only"
+    
+    logger.info(f"✅ After cleaning - tier: '{tier}'")
+    
     if not file.filename.endswith('.pdf'):
         raise HTTPException(400, "Only PDF files are supported")
     
     # Validate tier
     if not is_valid_tier(tier):
+        logger.error(f"❌ Invalid tier: '{tier}'. Valid: audio_only, video_addon, premium_bundle")
         raise HTTPException(400, f"Invalid tier: {tier}. Must be one of: audio_only, video_addon, premium_bundle")
     
     content = await file.read()
     if len(content) > 50*1024*1024:
         raise HTTPException(413, "File too large")
     
-    # Create job ID with just timestamp + random suffix (avoid filename issues)
+    # Create job ID
     import uuid
     jid = f"job_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     pdf_filename = file.filename.replace('.pdf', '')
     (UPLOAD_DIR / f"{jid}.pdf").write_bytes(content)
     
-    tier_info = get_tier_info(tier)
+    include_video = tier in ["video_addon", "premium_bundle"]
     
     with jobs_lock:
         jobs[jid] = {
@@ -416,15 +449,19 @@ async def upload(bg: BackgroundTasks, file: UploadFile = File(...), multi_voice:
             "filename": pdf_filename, 
             "progress": 0,
             "tier": tier,
-            "include_video": tier in ["video_addon", "premium_bundle"],
+            "include_video": include_video,
             "video_status": None,
             "video_id": None
         }
         save_jobs_to_disk(jobs)
     
-    logger.info(f"✅ Job {jid} created for file: {file.filename}, tier: {tier}")
+    logger.info(f"✅ JOB CREATED: {jid}")
+    logger.info(f"   - tier: {tier}")
+    logger.info(f"   - include_video: {include_video}")
+    logger.info(f"   - voice: {voice}")
+    
     bg.add_task(run_process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice, tier)
-    return {"job_id": jid, "status": "pending", "tier": tier}
+    return {"job_id": jid, "status": "pending", "tier": tier, "include_video": include_video}
 
 @app.get("/jobs/{jid}")
 async def status(jid: str):
