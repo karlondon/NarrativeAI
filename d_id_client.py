@@ -1,7 +1,10 @@
 """D-ID API Client for Video Generation"""
 import os
 import requests
+import logging
 from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 class DIDClient:
     BASE_URL = "https://api.d-id.com/talks"
@@ -12,6 +15,7 @@ class DIDClient:
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
+        logger.info(f"D-ID Client initialized with API key (first 20 chars): {api_key[:20] if api_key else 'None'}...")
     
     def create_video(self, audio_url: str, avatar: str = "morgan-png", name: str = "Video") -> Dict:
         """Create talking head video from audio"""
@@ -21,12 +25,19 @@ class DIDClient:
             "presenter_id": avatar,
             "name": name
         }
+        logger.info(f"D-ID: Sending POST to {self.BASE_URL}")
+        logger.info(f"D-ID: Payload: {payload}")
+        logger.info(f"D-ID: Headers: Authorization header present: {'Authorization' in self.headers}")
+        
         try:
             r = requests.post(self.BASE_URL, headers=self.headers, json=payload, timeout=30)
+            logger.info(f"D-ID: Response status code: {r.status_code}")
+            logger.info(f"D-ID: Response body: {r.text}")
             r.raise_for_status()
             d = r.json()
             return {"success": True, "video_id": d.get("id"), "status": d.get("status")}
         except Exception as e:
+            logger.error(f"D-ID: Exception occurred: {str(e)}")
             return {"success": False, "error": str(e)}
     
     def get_status(self, video_id: str) -> Dict:
