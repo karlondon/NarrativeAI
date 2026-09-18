@@ -4,7 +4,7 @@ from pricing_config import is_valid_tier, get_tier_info
 from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import boto3
@@ -281,10 +281,27 @@ async def create_square_payment(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
+    from datetime import datetime
     # Serve the main index.html with tier selection and pricing features
     landing_path = Path(__file__).parent / "index.html"
     if landing_path.exists():
-        return landing_path.read_text()
+        content = landing_path.read_text()
+        # Inject timestamp to verify fresh load (for debugging)
+        timestamp = datetime.utcnow().isoformat()
+        content = content.replace("</title>", f"</title>\n<!-- Generated: {timestamp} -->")
+        
+        # Return with cache-busting headers
+        return Response(
+            content=content,
+            media_type="text/html",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "SAMEORIGIN"
+            }
+        )
     else:
         # Fallback to index_new.html if index.html not found
         fallback_path = Path(__file__).parent / "index_new.html"
