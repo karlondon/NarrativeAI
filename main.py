@@ -197,6 +197,45 @@ async def health():
     return Health(status="healthy", version="0.3.0", aws_ok=polly_client is not None)
 
 
+@app.get("/debug/status")
+async def debug_status():
+    """Diagnostic endpoint to check which HTML file is being served"""
+    import os
+    from pathlib import Path
+    
+    landing_path = Path(__file__).parent / "index.html"
+    fallback_path = Path(__file__).parent / "index_new.html"
+    old_ui_path = Path(__file__).parent / "ui.html"
+    
+    # Read a snippet from the actual file being served
+    if os.path.exists(landing_path):
+        with open(landing_path, 'r', encoding='utf-8') as f:
+            content = f.read(500)
+        has_tier_select = "tier-select" in content
+        file_being_served = "index.html"
+    elif os.path.exists(fallback_path):
+        with open(fallback_path, 'r', encoding='utf-8') as f:
+            content = f.read(500)
+        has_tier_select = "tier-select" in content
+        file_being_served = "index_new.html"
+    else:
+        has_tier_select = False
+        file_being_served = "fallback (get_html_ui)"
+        content = ""
+    
+    return {
+        "timestamp": datetime.utcnow().isoformat(),
+        "file_being_served": file_being_served,
+        "has_tier_select": has_tier_select,
+        "index_html_exists": os.path.exists(landing_path),
+        "index_new_html_exists": os.path.exists(fallback_path),
+        "ui_html_exists": os.path.exists(old_ui_path),
+        "index_html_size": os.path.getsize(landing_path) if os.path.exists(landing_path) else 0,
+        "index_html_mtime": os.path.getmtime(landing_path) if os.path.exists(landing_path) else None,
+        "snippet": content[:200]
+    }
+
+
 # ===== FREEMIUM API ENDPOINTS =====
 @app.get("/api/free-tier")
 async def free_tier_status(request: Request):
