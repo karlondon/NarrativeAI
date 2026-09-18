@@ -876,6 +876,8 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True, tier: 
                 # Audio URL must be publicly accessible
                 audio_url = f"https://narrativeai.myblognow.uk/download/{jid}?type=audio"
                 
+                logger.info(f"Calling D-ID API with audio_url: {audio_url}")
+                
                 # Create D-ID video
                 video_result = D_ID_CLIENT.create_video(
                     audio_url=audio_url,
@@ -883,8 +885,12 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True, tier: 
                     name=f"NarrativeAI-{jid}"
                 )
                 
+                logger.info(f"D-ID API Response: {video_result}")
+                
                 # Fix: D-ID client returns "video_id" not "id"
                 video_id = video_result.get("video_id")
+                logger.info(f"Extracted video_id: {video_id}, full response keys: {list(video_result.keys())}")
+                
                 if video_id:
                     logger.info(f"✅ D-ID video creation initiated: {video_id}")
                     with jobs_lock:
@@ -892,9 +898,10 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True, tier: 
                         jobs[jid]["video_status"] = "processing"
                         save_jobs_to_disk(jobs)
                 else:
-                    logger.error(f"❌ D-ID video creation failed: no video ID returned")
+                    logger.error(f"❌ D-ID video creation failed: no video ID returned. Response: {video_result}")
                     with jobs_lock:
                         jobs[jid]["video_status"] = "failed"
+                        jobs[jid]["video_error"] = f"No video ID in response: {video_result}"
                         save_jobs_to_disk(jobs)
             except Exception as e:
                 logger.error(f"❌ D-ID video generation error: {e}")
