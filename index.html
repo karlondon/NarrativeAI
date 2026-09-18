@@ -214,24 +214,47 @@
             if (!f) { alert("Select PDF"); return; } 
             
             currentTier = document.getElementById("tier-select").value; 
+            console.log("=== UPLOAD START ===");
             console.log("Submitting tier:", currentTier); 
+            console.log("Selected file:", f.name, f.size, "bytes");
             
             const d = new FormData(); 
             d.append("file", f); 
             d.append("tier", currentTier); 
             d.append("voice", document.getElementById("voice-select").value); 
             
+            console.log("FormData contents:");
+            for (let pair of d.entries()) {
+                console.log("  -", pair[0], ":", pair[1]);
+            }
+            
             const b = document.getElementById("convert-btn"); 
             b.disabled = true; 
             b.textContent = "⏳ Uploading..."; 
             
             try { 
+                console.log("📤 Sending POST request to /upload...");
                 const r = await fetch("/upload", { method: "POST", body: d }); 
-                const a = await r.json(); 
-                console.log("🎯 FULL RESPONSE FROM SERVER:", JSON.stringify(a, null, 2)); 
-                console.log("Tier received from backend:", a.tier);
-                console.log("Include video:", a.include_video);
-                console.log("Response OK:", r.ok);
+                
+                console.log("📡 Response received:");
+                console.log("   - Status:", r.status);
+                console.log("   - OK:", r.ok);
+                console.log("   - Content-Type:", r.headers.get("content-type"));
+                
+                // First, read the response as text to see what we're actually getting
+                const responseText = await r.text();
+                console.log("   - Response text (first 500 chars):", responseText.substring(0, 500));
+                
+                // Try to parse as JSON
+                let a;
+                try {
+                    a = JSON.parse(responseText);
+                    console.log("   ✅ Valid JSON response:", JSON.stringify(a, null, 2));
+                } catch (jsonError) {
+                    console.error("   ❌ Invalid JSON response!", jsonError);
+                    console.log("   Full response:", responseText);
+                    throw new Error(`Server returned invalid JSON. Status: ${r.status}. Response: ${responseText.substring(0, 200)}`);
+                }
                 
                 if (r.ok) { 
                     currentJobId = a.job_id;
@@ -247,12 +270,8 @@
                         console.log("✅ Video ENABLED - showing video status section");
                         const videoStatusDiv = document.getElementById("video-status");
                         const videoDownloadBtn = document.getElementById("video-download-btn");
-                        console.log("   - video-status element:", videoStatusDiv);
-                        console.log("   - video-download-btn element:", videoDownloadBtn);
                         videoStatusDiv.classList.add("active");
                         videoDownloadBtn.style.display = "block";
-                        console.log("   - video-status classes after add:", videoStatusDiv.className);
-                        console.log("   - video-download-btn display:", videoDownloadBtn.style.display);
                     } else {
                         console.log("❌ Video DISABLED - include_video is false");
                     }
@@ -266,13 +285,14 @@
                         console.log("❌ Skipping video polling - video not enabled");
                     }
                 } else { 
-                    alert("Error"); 
+                    console.error("❌ Error response:", r.status, r.statusText);
+                    alert("Upload failed: " + r.statusText); 
                     b.disabled = false; 
                     b.textContent = "🚀 Convert"; 
                 } 
             } catch (e) { 
-                alert("Error: " + e.message); 
                 console.error("❌ Exception in handleConvert:", e);
+                alert("Error: " + e.message); 
                 b.disabled = false; 
                 b.textContent = "🚀 Convert"; 
             } 
