@@ -877,7 +877,8 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True, tier: 
                 # Create D-ID video
                 video_result = D_ID_CLIENT.create_video(
                     audio_url=audio_url,
-                    driver_url="https://d-id-public-bucket.s3.amazonaws.com/or-paul_20220721.png"  # Default avatar
+                    avatar="morgan-png",  # D-ID avatar preset
+                    name=f"NarrativeAI-{jid}"
                 )
                 
                 video_id = video_result.get("id")
