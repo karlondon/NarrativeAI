@@ -36,8 +36,9 @@ jobs:
       
       - name: Deploy to Lightsail
         env:
-          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_SERVER_IP }}
-          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USERNAME }}
+          # Use new secrets if available, fall back to old ones
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_SERVER_IP || secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USERNAME || secrets.LIGHTSAIL_USER }}
           LIGHTSAIL_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
