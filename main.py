@@ -281,12 +281,16 @@ async def create_square_payment(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    # Serve the new landing page
-    landing_path = Path(__file__).parent / "index_new.html"
+    # Serve the main index.html with tier selection and pricing features
+    landing_path = Path(__file__).parent / "index.html"
     if landing_path.exists():
         return landing_path.read_text()
     else:
-        # Fallback to old UI if index_new.html not found
+        # Fallback to index_new.html if index.html not found
+        fallback_path = Path(__file__).parent / "index_new.html"
+        if fallback_path.exists():
+            return fallback_path.read_text()
+        # Last resort: use old UI
         ui_path = Path(__file__).parent / "ui.html"
         return ui_path.read_text() if ui_path.exists() else get_html_ui()
 
