@@ -209,7 +209,57 @@
         async function checkFreeTier() { try { const r = await fetch("/api/free-tier"); const d = await r.json(); document.getElementById("status-box").innerHTML = "✅ " + d.remaining + " free conversions"; } catch (e) { } }
         function handleFileSelect(e) { const f = e.target.files[0]; if (!f || !f.name.endsWith(".pdf")) { alert("Select PDF"); return; } document.getElementById("upload-box").classList.add("active"); document.getElementById("upload-box").innerHTML = "✅<p style='color: #28a745; margin-top: 10px;'><strong>" + f.name + "</strong></p>"; document.getElementById("controls").classList.add("active"); }
         function updateTierInfo() { const t = document.getElementById("tier-select").value; currentTier = t; const i = { audio_only: "🎙️ Audio Only", video_addon: "🎥 Audio + Video", premium_bundle: "⭐ Premium" }; document.getElementById("tier-details").textContent = i[t]; document.getElementById("tier-info").classList.add("active"); if (t !== "audio_only") { document.getElementById("video-download-btn").style.display = "block"; document.getElementById("video-status").classList.add("active"); } else { document.getElementById("video-download-btn").style.display = "none"; } }
-        async function handleConvert() { const f = document.getElementById("pdf-file").files[0]; if (!f) { alert("Select PDF"); return; } currentTier = document.getElementById("tier-select").value; console.log("Submitting tier:", currentTier); const d = new FormData(); d.append("file", f); d.append("tier", currentTier); d.append("voice", document.getElementById("voice-select").value); const b = document.getElementById("convert-btn"); b.disabled = true; b.textContent = "⏳ Uploading..."; try { const r = await fetch("/upload", { method: "POST", body: d }); const a = await r.json(); console.log("Response:", a); if (r.ok) { currentJobId = a.job_id; console.log("Job tier:", a.tier); document.getElementById("download-section").classList.add("active"); pollJobStatus(currentJobId); if (currentTier !== "audio_only") startVideoPolling(currentJobId); } else { alert("Error"); b.disabled = false; b.textContent = "🚀 Convert"; } } catch (e) { alert("Error"); b.disabled = false; b.textContent = "🚀 Convert"; } }
+        async function handleConvert() { 
+            const f = document.getElementById("pdf-file").files[0]; 
+            if (!f) { alert("Select PDF"); return; } 
+            
+            currentTier = document.getElementById("tier-select").value; 
+            console.log("Submitting tier:", currentTier); 
+            
+            const d = new FormData(); 
+            d.append("file", f); 
+            d.append("tier", currentTier); 
+            d.append("voice", document.getElementById("voice-select").value); 
+            
+            const b = document.getElementById("convert-btn"); 
+            b.disabled = true; 
+            b.textContent = "⏳ Uploading..."; 
+            
+            try { 
+                const r = await fetch("/upload", { method: "POST", body: d }); 
+                const a = await r.json(); 
+                console.log("Response:", a); 
+                console.log("Tier received from backend:", a.tier);
+                console.log("Include video:", a.include_video);
+                
+                if (r.ok) { 
+                    currentJobId = a.job_id; 
+                    document.getElementById("download-section").classList.add("active"); 
+                    
+                    // Make sure video status is visible if video is enabled
+                    if (a.include_video) {
+                        console.log("Video enabled - showing video status section");
+                        document.getElementById("video-status").classList.add("active");
+                        document.getElementById("video-download-btn").style.display = "block";
+                    }
+                    
+                    pollJobStatus(currentJobId); 
+                    
+                    if (a.include_video) {
+                        console.log("Starting video polling");
+                        startVideoPolling(currentJobId); 
+                    }
+                } else { 
+                    alert("Error"); 
+                    b.disabled = false; 
+                    b.textContent = "🚀 Convert"; 
+                } 
+            } catch (e) { 
+                alert("Error: " + e.message); 
+                b.disabled = false; 
+                b.textContent = "🚀 Convert"; 
+            } 
+        }
         async function pollJobStatus(j) { const i = setInterval(async () => { try { const r = await fetch("/jobs/" + j); const d = await r.json(); document.getElementById("job-progress").textContent = d.progress; document.getElementById("progress-fill").style.width = d.progress + "%"; if (d.status === "completed") { clearInterval(i); document.getElementById("audio-download-btn").disabled = false; } } catch (e) { } }, 1000); }
         async function startVideoPolling(j) { if (videoPollingInterval) clearInterval(videoPollingInterval); videoPollingInterval = setInterval(async () => { try { const r = await fetch("/video-status/" + j); if (!r.ok) return; const d = await r.json(); const v = document.getElementById("video-status"); if (d.status === "completed") { clearInterval(videoPollingInterval); v.classList.add("completed"); document.getElementById("video-status-text").innerHTML = "✅ Ready!"; document.getElementById("video-download-btn").disabled = false; } else if (d.status === "processing") { v.classList.add("processing"); document.getElementById("video-status-text").innerHTML = "🔄 Generating..."; } } catch (e) { } }, 2000); }
         async function downloadAudio() { if (!currentJobId) return; try { const r = await fetch("/download/" + currentJobId + "?type=audio"); const b = await r.blob(); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = "audiobook.mp3"; a.click(); URL.revokeObjectURL(u); } catch (e) { alert("Error"); } }
