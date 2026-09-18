@@ -430,8 +430,10 @@ async def upload(
         raise HTTPException(400, f"Invalid tier: {tier}. Must be one of: audio_only, video_addon, premium_bundle")
     
     content = await file.read()
-    if len(content) > 50*1024*1024:
-        raise HTTPException(413, "File too large")
+    # Max file size: 150MB
+    MAX_FILE_SIZE = 150 * 1024 * 1024
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(413, f"File too large. Maximum file size is 150MB. Your file is {len(content) / (1024*1024):.1f}MB")
     
     # Create job ID
     import uuid

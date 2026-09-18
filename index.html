@@ -89,6 +89,7 @@
             <div class="upload-box" id="upload-box" onclick="document.getElementById('pdf-file').click()" style="font-size: 50px; cursor: pointer;">
                 📁
                 <p style="font-size: 18px; font-weight: bold; color: #667eea; margin-top: 10px;">Click to select PDF or drag & drop</p>
+                <p style="font-size: 14px; color: #999; margin-top: 5px;">Maximum file size: 150MB</p>
             </div>
             <input type="file" id="pdf-file" style="display: none;" accept=".pdf" onchange="handleFileSelect(event)">
             
@@ -109,6 +110,9 @@
                         <option value="Justin">Justin (Male - Friendly)</option>
                         <option value="Ivy">Ivy (Female - Energetic)</option>
                     </select>
+                </div>
+                <div style="background-color: #f0f4ff; border-left: 4px solid #667eea; padding: 12px; margin: 15px 0; border-radius: 4px; font-size: 13px; color: #333;">
+                    💡 <strong>Tip:</strong> Maximum file size is 150MB. Larger PDFs may take longer to process.
                 </div>
                 <button class="btn btn-primary" onclick="handleConvert()" id="convert-btn">🚀 Convert Now</button>
             </div>
