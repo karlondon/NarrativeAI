@@ -1,4 +1,7 @@
 import os, logging, time, re, subprocess, asyncio, threading, json, uuid, hashlib
+from d_id_client import get_did_client
+from pricing_config import is_valid_tier, get_tier_info
+from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -29,6 +32,36 @@ FREE_CONVERSIONS_PER_DAY = 5
 DOWNLOAD_PRICE_GBP = 1.0
 SESSION_DB_FILE = Path("sessions_db.json")
 GOOGLE_ANALYTICS_ID = "G-XXXXXXXXXX"  # Replace with your GA ID
+
+# ===== SQUARE PAYMENT CONFIG =====
+SQUARE_ACCESS_TOKEN = os.getenv('SQUARE_ACCESS_TOKEN')
+SQUARE_APPLICATION_ID = os.getenv('SQUARE_APPLICATION_ID')
+SQUARE_LOCATION_ID = os.getenv('SQUARE_LOCATION_ID')
+SQUARE_ENVIRONMENT = os.getenv('SQUARE_ENVIRONMENT', 'production')
+SQUARE_AVAILABLE = bool(os.getenv('SQUARE_ACCESS_TOKEN') and os.getenv('SQUARE_APPLICATION_ID'))
+
+# D-ID Video Generation
+D_ID_CLIENT = get_did_client()
+D_ID_AVAILABLE = D_ID_CLIENT is not None
+if D_ID_AVAILABLE:
+    logger.info("✅ D-ID video generation enabled")
+
+
+def get_square_client():
+    """Initialize Square client for payments"""
+    if not SQUARE_AVAILABLE or not SQUARE_ACCESS_TOKEN:
+        return None
+    try:
+        client = Client(
+            access_token=SQUARE_ACCESS_TOKEN,
+            environment=SQUARE_ENVIRONMENT
+        )
+        logger.info("✅ Square client initialized")
+        return client
+    except Exception as e:
+        logger.error(f"❌ Square initialization error: {e}")
+        return None
+
 
 polly = None
 
@@ -163,29 +196,139 @@ async def health():
     polly_client = get_polly_client()
     return Health(status="healthy", version="0.3.0", aws_ok=polly_client is not None)
 
+
+# ===== FREEMIUM API ENDPOINTS =====
+@app.get("/api/free-tier")
+async def free_tier_status(request: Request):
+    """Check user's free tier status"""
+    user_id = get_client_id(request)
+    is_free, used, remaining = check_free_tier(user_id)
+    return {
+        "is_free_tier": is_free,
+        "used": used,
+        "remaining": remaining,
+        "limit": FREE_CONVERSIONS_PER_DAY
+    }
+
+@app.get("/api/square-config")
+async def square_config():
+    """Get Square Web Payments SDK configuration"""
+    return {
+        "applicationId": SQUARE_APPLICATION_ID,
+        "locationId": SQUARE_LOCATION_ID,
+        "priceGBP": DOWNLOAD_PRICE_GBP,
+        "environment": SQUARE_ENVIRONMENT,
+        "squareAvailable": SQUARE_AVAILABLE
+    }
+
+@app.post("/api/square-payment")
+async def create_square_payment(request: Request):
+    """Process payment using Square"""
+    try:
+        user_id = get_client_id(request)
+        body = await request.json()
+        source_id = body.get("sourceId")
+        job_id = body.get("jobId")
+        
+        if not source_id or not job_id:
+            raise HTTPException(400, "Missing sourceId or jobId")
+        
+        client = get_square_client()
+        if not client:
+            raise HTTPException(503, "Payment service unavailable")
+        
+        # Create payment
+        payment_body = {
+            "source_id": source_id,
+            "amount_money": {
+                "amount": int(DOWNLOAD_PRICE_GBP * 100),
+                "currency": "GBP"
+            },
+            "currency": "GBP",
+            "idempotency_key": str(uuid.uuid4()),
+            "reference_id": job_id,
+            "note": f"NarrativeAI: {job_id}",
+            "autocomplete": True
+        }
+        
+        result = client.payments.create_payment(payment_body)
+        
+        if result.is_success():
+            payment_id = result.result["payment"]["id"]
+            logger.info(f"✅ Payment successful: {payment_id} for job {job_id}")
+            
+            # Grant extra conversion
+            today = get_today()
+            paid_key = f"{user_id}:paid:{today}"
+            with sessions_lock:
+                sessions[paid_key] = sessions.get(paid_key, 0) + 1
+                save_sessions_to_disk(sessions)
+            
+            return {
+                "success": True,
+                "paymentId": payment_id,
+                "message": "Payment successful! You can now download your audiobook.",
+                "extraConversions": 1
+            }
+        else:
+            error_msg = str(result.errors) if result.errors else "Payment processing error"
+            logger.error(f"❌ Payment error: {error_msg}")
+            raise HTTPException(400, f"Payment failed: {error_msg}")
+    
+    except Exception as e:
+        logger.error(f"❌ Square payment error: {e}")
+        raise HTTPException(500, f"Payment error: {str(e)}")
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    ui_path = Path(__file__).parent / "ui.html"
-    return ui_path.read_text() if ui_path.exists() else get_html_ui()
+    # Serve the new landing page
+    landing_path = Path(__file__).parent / "index_new.html"
+    if landing_path.exists():
+        return landing_path.read_text()
+    else:
+        # Fallback to old UI if index_new.html not found
+        ui_path = Path(__file__).parent / "ui.html"
+        return ui_path.read_text() if ui_path.exists() else get_html_ui()
 
 @app.post("/upload")
-async def upload(bg: BackgroundTasks, file: UploadFile = File(...), multi_voice: bool = True):
+async def upload(bg: BackgroundTasks, file: UploadFile = File(...), multi_voice: bool = True, tier: str = "audio_only"):
+    """Upload PDF and start conversion with pricing tier support"""
     if not file.filename.endswith('.pdf'):
         raise HTTPException(400, "Only PDF files are supported")
+    
+    # Validate tier
+    if not is_valid_tier(tier):
+        raise HTTPException(400, f"Invalid tier: {tier}. Must be one of: audio_only, video_addon, premium_bundle")
+    
     content = await file.read()
     if len(content) > 50*1024*1024:
         raise HTTPException(413, "File too large")
+    
     # Create job ID with just timestamp + random suffix (avoid filename issues)
     import uuid
     jid = f"job_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     pdf_filename = file.filename.replace('.pdf', '')
     (UPLOAD_DIR / f"{jid}.pdf").write_bytes(content)
+    
+    tier_info = get_tier_info(tier)
+    
     with jobs_lock:
-        jobs[jid] = {"id": jid, "status": "pending", "file": file.filename, "filename": pdf_filename, "progress": 0}
-        save_jobs_to_disk(jobs)  # Persist to disk
-    logger.info(f"✅ Job {jid} created for file: {file.filename}")
-    bg.add_task(run_process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice)
-    return {"job_id": jid, "status": "pending"}
+        jobs[jid] = {
+            "id": jid, 
+            "status": "pending", 
+            "file": file.filename, 
+            "filename": pdf_filename, 
+            "progress": 0,
+            "tier": tier,
+            "include_video": tier in ["video_addon", "premium_bundle"],
+            "video_status": None,
+            "video_id": None
+        }
+        save_jobs_to_disk(jobs)
+    
+    logger.info(f"✅ Job {jid} created for file: {file.filename}, tier: {tier}")
+    bg.add_task(run_process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice, tier)
+    return {"job_id": jid, "status": "pending", "tier": tier}
 
 @app.get("/jobs/{jid}")
 async def status(jid: str):
@@ -200,6 +343,7 @@ async def status(jid: str):
 
 @app.get("/jobs/{jid}/download")
 async def download(jid: str):
+    """Download audio file from completed job (legacy endpoint)"""
     if jid not in jobs or jobs[jid]['status'] != 'completed':
         raise HTTPException(400, "Job not ready or not found")
     
@@ -211,6 +355,91 @@ async def download(jid: str):
     filename = f"{jobs[jid]['file'].replace('.pdf','')}.mp3"
     logger.info(f"✅ Download: Sending {filename} ({f.stat().st_size / 1024 / 1024:.1f}MB)")
     return FileResponse(f, filename=filename, media_type="audio/mpeg")
+
+@app.get("/video-status/{job_id}")
+async def get_video_status(job_id: str):
+    """Get D-ID video generation status"""
+    if not D_ID_AVAILABLE:
+        raise HTTPException(503, "Video generation service unavailable")
+    
+    if job_id not in jobs:
+        raise HTTPException(404, "Job not found")
+    
+    job = jobs[job_id]
+    if not job.get("include_video"):
+        raise HTTPException(400, "This job does not have video generation enabled")
+    
+    if not job.get("video_id"):
+        return {
+            "status": "pending",
+            "message": "Video generation not yet started"
+        }
+    
+    try:
+        status_result = D_ID_CLIENT.get_status(job["video_id"])
+        
+        with jobs_lock:
+            jobs[job_id]["video_status"] = status_result.get("status")
+            save_jobs_to_disk(jobs)
+        
+        return {
+            "video_id": job["video_id"],
+            "status": status_result.get("status"),
+            "result_url": status_result.get("result_url") if status_result.get("status") == "completed" else None
+        }
+    except Exception as e:
+        logger.error(f"❌ Error getting video status: {e}")
+        raise HTTPException(500, f"Error checking video status: {str(e)}")
+
+@app.get("/download/{job_id}")
+async def download_file(job_id: str, type: str = "audio"):
+    """Download audio or video file. Type: 'audio' or 'video'"""
+    if job_id not in jobs:
+        raise HTTPException(404, "Job not found")
+    
+    job = jobs[job_id]
+    
+    if type == "audio":
+        # Download audio MP3
+        if job['status'] != 'completed':
+            raise HTTPException(400, "Audio not yet available")
+        
+        f = OUTPUT_DIR / f"{job_id}.mp3"
+        if not f.exists():
+            logger.error(f"❌ Download: Audio file not found: {f}")
+            raise HTTPException(404, f"Audio file not found for job {job_id}")
+        
+        filename = f"{job['file'].replace('.pdf','')}.mp3"
+        logger.info(f"✅ Download: Sending {filename} ({f.stat().st_size / 1024 / 1024:.1f}MB)")
+        return FileResponse(f, filename=filename, media_type="audio/mpeg")
+    
+    elif type == "video":
+        # Download video MP4
+        if not job.get("include_video"):
+            raise HTTPException(400, "This job does not include video")
+        
+        if not job.get("video_id"):
+            raise HTTPException(400, "Video not yet generated")
+        
+        # Get video status
+        try:
+            status_result = D_ID_CLIENT.get_status(job["video_id"])
+            if status_result.get("status") != "completed":
+                raise HTTPException(400, f"Video not yet ready: {status_result.get('status')}")
+            
+            # Return the video URL from D-ID
+            video_url = status_result.get("result_url")
+            if not video_url:
+                raise HTTPException(500, "Video URL not available from D-ID")
+            
+            logger.info(f"✅ Download: Video ready for {job_id}")
+            return {"video_url": video_url, "status": "completed"}
+        except Exception as e:
+            logger.error(f"❌ Error downloading video: {e}")
+            raise HTTPException(500, f"Error retrieving video: {str(e)}")
+    
+    else:
+        raise HTTPException(400, "Invalid type. Must be 'audio' or 'video'")
 
 def detect_speaker(text: str, segment_index: int = 0) -> tuple:
     """
@@ -325,7 +554,7 @@ def extract_segments(pdf_path: Path) -> list:
         raise
     return segments
 
-def run_process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
+def run_process_pdf(jid: str, path: Path, use_multi_voice: bool = True, tier: str = "audio_only"):
     """Wrapper to run async process_pdf in background task"""
     print(f"🚀 BACKGROUND TASK STARTED for {jid}")
     print(f"File path: {path}, exists: {path.exists()}")
@@ -339,7 +568,7 @@ def run_process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(process_pdf(jid, path, use_multi_voice))
+            loop.run_until_complete(process_pdf(jid, path, use_multi_voice, tier))
         finally:
             loop.close()
     except Exception as e:
@@ -352,11 +581,11 @@ def run_process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
             jobs[jid]["progress"] = 0
             save_jobs_to_disk(jobs)
 
-async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
+async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True, tier: str = "audio_only"):
     global GLOBAL_CHARACTER_VOICES
     GLOBAL_CHARACTER_VOICES = {}  # Reset character voices for each new PDF
     try:
-        logger.info(f"Starting {jid}")
+        logger.info(f"Starting {jid} with tier: {tier}")
         with jobs_lock:
             jobs[jid]["status"] = "processing"
             jobs[jid]["progress"] = 5
@@ -501,6 +730,42 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
                 for af in audio_files[1:]:
                     af.unlink(missing_ok=True)
         
+        # Now handle video generation if tier includes it
+        if tier in ["video_addon", "premium_bundle"] and D_ID_AVAILABLE:
+            logger.info(f"Job {jid}: Starting D-ID video generation for tier: {tier}")
+            with jobs_lock:
+                jobs[jid]["progress"] = 95
+                save_jobs_to_disk(jobs)
+            
+            try:
+                # Audio URL must be publicly accessible
+                audio_url = f"https://narrativeai.myblognow.uk/download/{jid}?type=audio"
+                
+                # Create D-ID video
+                video_result = D_ID_CLIENT.create_video(
+                    audio_url=audio_url,
+                    driver_url="https://d-id-public-bucket.s3.amazonaws.com/or-paul_20220721.png"  # Default avatar
+                )
+                
+                video_id = video_result.get("id")
+                if video_id:
+                    logger.info(f"✅ D-ID video creation initiated: {video_id}")
+                    with jobs_lock:
+                        jobs[jid]["video_id"] = video_id
+                        jobs[jid]["video_status"] = "processing"
+                        save_jobs_to_disk(jobs)
+                else:
+                    logger.error(f"❌ D-ID video creation failed: no video ID returned")
+                    with jobs_lock:
+                        jobs[jid]["video_status"] = "failed"
+                        save_jobs_to_disk(jobs)
+            except Exception as e:
+                logger.error(f"❌ D-ID video generation error: {e}")
+                with jobs_lock:
+                    jobs[jid]["video_status"] = "failed"
+                    jobs[jid]["error"] = f"Video generation failed: {str(e)}"
+                    save_jobs_to_disk(jobs)
+        
         with jobs_lock:
             jobs[jid]["status"] = "completed"
             jobs[jid]["progress"] = 100
@@ -515,6 +780,222 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True):
 
 def get_html_ui():
     return ""
+
+
+# ===== BLOG ROUTES =====
+BLOG_POSTS = {
+    "pdf-to-audiobook-guide": {
+        "title": "Complete Guide: Convert PDF to Audiobook Free",
+        "slug": "pdf-to-audiobook-guide",
+        "excerpt": "Learn how to convert any PDF into a professional audiobook in minutes using NarrativeAI.",
+        "image": "https://via.placeholder.com/800x400?text=PDF+to+Audiobook",
+        "author": "NarrativeAI Team",
+        "date": "2026-09-17",
+        "content": """
+<h2>Why Convert PDF to Audiobook?</h2>
+<p>PDF to audiobook conversion is perfect for:</p>
+<ul>
+  <li>📚 Students wanting to learn while commuting</li>
+  <li>🚗 Drivers who want educational content</li>
+  <li>♿ People with visual impairments</li>
+  <li>📖 Book lovers who want to "read" faster</li>
+</ul>
+
+<h2>How to Use NarrativeAI</h2>
+<ol>
+  <li>Upload your PDF file</li>
+  <li>Choose your preferred voice</li>
+  <li>Click Convert</li>
+  <li>Download your audiobook as MP3</li>
+</ol>
+
+<h2>Features</h2>
+<ul>
+  <li>✅ Natural-sounding voices</li>
+  <li>✅ Multiple voice options</li>
+  <li>✅ High-quality audio output</li>
+  <li>✅ Fast processing</li>
+  <li>✅ Secure and private</li>
+</ul>
+
+<h2>Pricing</h2>
+<p>Get <strong>5 free conversions every day</strong>, then just £1 per additional conversion.</p>
+        """
+    },
+    "best-text-to-speech-tools": {
+        "title": "Best Text-to-Speech Tools Compared (2026)",
+        "slug": "best-text-to-speech-tools",
+        "excerpt": "Compare the top TTS tools and discover why NarrativeAI is the best choice for PDF audiobooks.",
+        "image": "https://via.placeholder.com/800x400?text=TTS+Comparison",
+        "author": "NarrativeAI Team",
+        "date": "2026-09-16",
+        "content": """
+<h2>Text-to-Speech Tools Comparison</h2>
+
+<table>
+  <tr>
+    <th>Tool</th>
+    <th>Quality</th>
+    <th>Price</th>
+    <th>Speed</th>
+  </tr>
+  <tr>
+    <td>NarrativeAI</td>
+    <td>⭐⭐⭐⭐⭐</td>
+    <td>£1 per conversion</td>
+    <td>⚡ Instant</td>
+  </tr>
+  <tr>
+    <td>Google Cloud TTS</td>
+    <td>⭐⭐⭐⭐</td>
+    <td>Complex pricing</td>
+    <td>⚡ Fast</td>
+  </tr>
+  <tr>
+    <td>Amazon Polly</td>
+    <td>⭐⭐⭐⭐</td>
+    <td>Complex pricing</td>
+    <td>⚡ Fast</td>
+  </tr>
+</table>
+
+<h2>Why Choose NarrativeAI?</h2>
+<ul>
+  <li>💰 Simple pricing (£1 per conversion)</li>
+  <li>🎯 Optimized for PDFs</li>
+  <li>⚡ Lightning-fast processing</li>
+  <li>🎵 High-quality audio</li>
+  <li>😊 Easy to use interface</li>
+</ul>
+        """
+    }
+}
+
+@app.get("/blog", response_class=HTMLResponse)
+async def blog_home():
+    """Blog homepage"""
+    posts_html = ""
+    for post in BLOG_POSTS.values():
+        posts_html += f"""
+        <div class="blog-card">
+            <img src="{post['image']}" alt="{post['title']}" class="blog-image">
+            <div class="blog-content">
+                <h3>{post['title']}</h3>
+                <p class="blog-excerpt">{post['excerpt']}</p>
+                <div class="blog-meta">
+                    <span>By {post['author']}</span>
+                    <span>{post['date']}</span>
+                </div>
+                <a href="/blog/{post['slug']}" class="read-more">Read More →</a>
+            </div>
+        </div>
+        """
+    
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Blog - NarrativeAI</title>
+        <style>
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }}
+            nav {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1em 2em; position: sticky; top: 0; z-index: 100; }}
+            nav a {{ color: white; text-decoration: none; font-weight: 600; margin-right: 2em; }}
+            nav a:hover {{ opacity: 0.8; }}
+            .container {{ max-width: 1200px; margin: 0 auto; padding: 2em; }}
+            .blog-grid {{ display: grid; gap: 2em; }}
+            .blog-card {{ background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); transition: all 0.3s; }}
+            .blog-card:hover {{ transform: translateY(-5px); box-shadow: 0 8px 16px rgba(0,0,0,0.15); }}
+            .blog-image {{ width: 100%; height: 250px; object-fit: cover; }}
+            .blog-content {{ padding: 1.5em; }}
+            .blog-content h3 {{ color: #667eea; margin-bottom: 0.5em; }}
+            .blog-excerpt {{ color: #666; line-height: 1.6; margin-bottom: 1em; }}
+            .blog-meta {{ font-size: 0.9em; color: #999; display: flex; gap: 1em; margin-bottom: 1em; }}
+            .read-more {{ color: #667eea; text-decoration: none; font-weight: 600; }}
+            .read-more:hover {{ text-decoration: underline; }}
+            h1 {{ color: #667eea; margin-bottom: 1em; }}
+        </style>
+    </head>
+    <body>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/blog">Blog</a>
+        </nav>
+        <div class="container">
+            <h1>📖 NarrativeAI Blog</h1>
+            <p>Tips, guides, and stories about PDF to audiobook conversion</p>
+            <div class="blog-grid">
+                {posts_html}
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+@app.get("/blog/{slug}", response_class=HTMLResponse)
+async def blog_post(slug: str):
+    """Individual blog post"""
+    if slug not in BLOG_POSTS:
+        raise HTTPException(status_code=404, detail="Blog post not found")
+    
+    post = BLOG_POSTS[slug]
+    return f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="description" content="{post['excerpt']}">
+        <meta property="og:title" content="{post['title']}">
+        <meta property="og:description" content="{post['excerpt']}">
+        <meta property="og:image" content="{post['image']}">
+        <title>{post['title']} - NarrativeAI</title>
+        <style>
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.8; color: #333; }}
+            nav {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1em 2em; position: sticky; top: 0; z-index: 100; }}
+            nav a {{ color: white; text-decoration: none; font-weight: 600; margin-right: 2em; }}
+            .container {{ max-width: 800px; margin: 0 auto; padding: 2em; }}
+            .blog-header {{ margin-bottom: 2em; }}
+            .blog-header img {{ width: 100%; height: auto; border-radius: 8px; margin-bottom: 1em; }}
+            .blog-meta {{ color: #999; font-size: 0.9em; margin-bottom: 1em; }}
+            h1 {{ color: #667eea; margin-bottom: 0.5em; font-size: 2.5em; }}
+            h2 {{ color: #667eea; margin-top: 1.5em; margin-bottom: 0.5em; }}
+            p {{ margin-bottom: 1em; }}
+            ul, ol {{ margin-left: 2em; margin-bottom: 1em; }}
+            li {{ margin-bottom: 0.5em; }}
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 1em; }}
+            th, td {{ border: 1px solid #ddd; padding: 0.75em; text-align: left; }}
+            th {{ background: #f5f5f5; }}
+            .back-link {{ color: #667eea; text-decoration: none; font-weight: 600; }}
+            .back-link:hover {{ text-decoration: underline; }}
+        </style>
+    </head>
+    <body>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/blog">Blog</a>
+        </nav>
+        <div class="container">
+            <a href="/blog" class="back-link">← Back to Blog</a>
+            <div class="blog-header">
+                <img src="{post['image']}" alt="{post['title']}">
+                <h1>{post['title']}</h1>
+                <div class="blog-meta">
+                    <span>By {post['author']}</span>
+                    <span>{post['date']}</span>
+                </div>
+            </div>
+            <div class="blog-body">
+                {post['content']}
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
 
 if __name__ == "__main__":
     import uvicorn
