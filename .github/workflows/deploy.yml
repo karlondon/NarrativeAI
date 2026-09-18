@@ -54,14 +54,30 @@ jobs:
           AWS_REGION=us-east-1
           EOF
           
-          # Copy credentials to server and deploy
+          # Copy credentials to server and deploy with FORCE RESTART
           ssh -i ~/.ssh/id_rsa $LIGHTSAIL_USER@$LIGHTSAIL_HOST << 'DEPLOY'
             cd /home/ubuntu/NarrativeAI
+            echo "🔪 Force killing old Python processes..."
+            sudo pkill -9 -f "python.*main.py" || true
+            sudo pkill -9 -f "uvicorn" || true
+            sleep 2
+            echo "🧹 Cleaning Python cache files..."
+            find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+            find . -type f -name "*.pyc" -delete 2>/dev/null || true
+            echo "📥 Pulling latest code..."
             git pull origin main
             source venv/bin/activate
-            pip install -r requirements.txt
-            sudo systemctl restart narrativeai
-            echo "✅ Deployment successful!"
+            echo "📦 Installing dependencies..."
+            pip install -q -r requirements.txt
+            echo "⛔ Stopping service..."
+            sudo systemctl stop narrativeai || true
+            sleep 2
+            sudo systemctl reset-failed narrativeai || true
+            echo "🚀 Starting service..."
+            sudo systemctl start narrativeai
+            sleep 3
+            echo "✅ Service status:"
+            sudo systemctl status narrativeai
           DEPLOY
           
           # Now copy the .env file to the server
@@ -74,6 +90,8 @@ jobs:
             chmod 600 /home/ubuntu/NarrativeAI/.env
             cat /home/ubuntu/NarrativeAI/.env
             sudo systemctl restart narrativeai
+            sleep 2
+            sudo systemctl status narrativeai
             echo "✅ AWS credentials configured and service restarted!"
           SETENV
       
