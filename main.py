@@ -282,34 +282,45 @@ async def create_square_payment(request: Request):
 @app.get("/", response_class=HTMLResponse)
 async def root():
     from datetime import datetime
-    # Serve the main index.html with tier selection and pricing features
+    import os
+    
+    # ALWAYS read fresh from disk to bypass any caching
     landing_path = Path(__file__).parent / "index.html"
-    if landing_path.exists():
-        content = landing_path.read_text()
+    
+    # Force filesystem read with os.path to ensure fresh data
+    if os.path.exists(landing_path):
+        with open(landing_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
         # Inject timestamp to verify fresh load (for debugging)
         timestamp = datetime.utcnow().isoformat()
         content = content.replace("</title>", f"</title>\n<!-- Generated: {timestamp} -->")
         
-        # Return with cache-busting headers
+        # Return with aggressive cache-busting headers
         return Response(
             content=content,
-            media_type="text/html",
+            media_type="text/html; charset=utf-8",
             headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0, private",
                 "Pragma": "no-cache",
-                "Expires": "0",
+                "Expires": "-1",
                 "X-Content-Type-Options": "nosniff",
-                "X-Frame-Options": "SAMEORIGIN"
+                "X-Frame-Options": "SAMEORIGIN",
+                "ETag": f'"{os.path.getmtime(landing_path)}"'
             }
         )
     else:
         # Fallback to index_new.html if index.html not found
         fallback_path = Path(__file__).parent / "index_new.html"
-        if fallback_path.exists():
-            return fallback_path.read_text()
+        if os.path.exists(fallback_path):
+            with open(fallback_path, 'r', encoding='utf-8') as f:
+                return f.read()
         # Last resort: use old UI
         ui_path = Path(__file__).parent / "ui.html"
-        return ui_path.read_text() if ui_path.exists() else get_html_ui()
+        if os.path.exists(ui_path):
+            with open(ui_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        return get_html_ui()
 
 @app.post("/upload")
 async def upload(bg: BackgroundTasks, file: UploadFile = File(...), multi_voice: bool = True, tier: str = "audio_only"):
