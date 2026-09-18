@@ -883,7 +883,8 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True, tier: 
                     name=f"NarrativeAI-{jid}"
                 )
                 
-                video_id = video_result.get("id")
+                # Fix: D-ID client returns "video_id" not "id"
+                video_id = video_result.get("video_id")
                 if video_id:
                     logger.info(f"✅ D-ID video creation initiated: {video_id}")
                     with jobs_lock:
