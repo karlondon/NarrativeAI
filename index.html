@@ -1,205 +1,200 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NarrativeAI - PDF to Audiobook</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #333; line-height: 1.6; min-height: 100vh; }
-        nav { background: rgba(0,0,0,0.2); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
-        .logo { color: white; font-size: 24px; font-weight: bold; }
-        nav a { color: white; text-decoration: none; margin-left: 30px; font-weight: 600; }
-        .hero { color: white; padding: 60px 30px; text-align: center; }
-        .hero h1 { font-size: 48px; margin-bottom: 20px; }
-        .hero p { font-size: 18px; opacity: 0.9; }
-        .container { max-width: 800px; margin: 40px auto; padding: 0 20px; }
-        .app-section { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
-        .status-box { background: #e7f3ff; color: #0066cc; padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: center; font-weight: bold; }
-        .upload-box { border: 3px dashed #667eea; padding: 40px; text-align: center; border-radius: 12px; background: #f9f9f9; cursor: pointer; transition: all 0.3s; }
-        .upload-box:hover { border-color: #764ba2; }
-        .upload-box.active { border-color: #28a745; background: #f0fff4; }
-        .controls { display: none; margin: 20px 0; gap: 15px; flex-wrap: wrap; align-items: flex-end; }
-        .controls.active { display: flex; }
-        .form-group { margin: 20px 0; text-align: left; flex: 1; min-width: 200px; }
-        .form-group label { display: block; margin-bottom: 8px; font-weight: bold; color: #667eea; }
-        .form-group select { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; }
-        .form-group select:focus { outline: none; border-color: #667eea; box-shadow: 0 0 5px rgba(102, 126, 234, 0.3); }
-        .tier-info { background: #f0f7ff; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #667eea; display: none; }
-        .tier-info.active { display: block; }
-        .btn { padding: 15px 40px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
-        .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
-        .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3); }
-        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
-        .download-section { display: none; margin-top: 40px; padding: 20px; background: #f9f9f9; border-radius: 12px; }
-        .download-section.active { display: block; }
-        .progress-container { background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
-        .progress-label { font-weight: bold; color: #667eea; margin-bottom: 10px; }
-        .progress-bar { width: 100%; height: 30px; background: #e0e0e0; border-radius: 15px; overflow: hidden; }
-        .progress-fill { height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; transition: width 0.3s; }
-        .download-btn { padding: 15px 30px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: white; background: linear-gradient(135deg, #28a745 0%, #20c997 100%); }
-        .download-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .faq { margin-top: 60px; }
-        .faq h2 { color: white; margin-bottom: 30px; }
-        .faq-item { background: white; margin-bottom: 15px; border-radius: 8px; }
-        .faq-question { padding: 20px; cursor: pointer; font-weight: bold; color: #667eea; display: flex; justify-content: space-between; background: #f9f9f9; }
-        .faq-answer { padding: 0 20px; max-height: 0; overflow: hidden; transition: all 0.3s; }
-        .faq-answer.active { padding: 20px; max-height: 500px; }
-        footer { text-align: center; padding: 40px 20px; color: white; }
+        body { font-family: Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }
+        .nav { background: rgba(0,0,0,0.2); color: white; padding: 15px 30px; }
+        .nav h1 { margin: 0; font-size: 24px; }
+        .hero { color: white; padding: 40px 30px; text-align: center; }
+        .container { max-width: 800px; margin: 20px auto; padding: 0 20px; }
+        .box { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 5px 20px rgba(0,0,0,0.2); }
+        .status { background: #e7f3ff; color: #0066cc; padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: center; font-weight: bold; }
+        .upload { border: 3px dashed #667eea; padding: 40px; text-align: center; border-radius: 8px; background: #f9f9f9; cursor: pointer; }
+        .upload:hover { background: #f0f0f0; }
+        .upload.done { border-color: #28a745; background: #f0fff4; }
+        #pdf-file { display: none; }
+        .options { display: none; margin: 20px 0; gap: 15px; flex-wrap: wrap; }
+        .options.show { display: flex; }
+        .opt-group { flex: 1; min-width: 150px; }
+        .opt-group label { display: block; font-weight: bold; color: #667eea; margin-bottom: 5px; }
+        .opt-group select { width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 5px; }
+        .btn { padding: 12px 30px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .btn-convert { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .btn-convert:disabled { opacity: 0.5; cursor: not-allowed; }
+        .progress { display: none; margin-top: 20px; }
+        .progress.show { display: block; }
+        .progress-bar { width: 100%; height: 25px; background: #e0e0e0; border-radius: 10px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); width: 0%; }
+        .download { display: none; margin-top: 20px; }
+        .download.show { display: block; }
+        .btn-download { background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; }
+        .btn-download:disabled { opacity: 0.5; cursor: not-allowed; }
+        .price { background: #f0f7ff; padding: 15px; border-left: 4px solid #667eea; border-radius: 5px; margin: 15px 0; display: none; }
+        .price.show { display: block; }
+        footer { text-align: center; color: white; padding: 30px 20px; }
     </style>
 </head>
 <body>
-    <nav>
-        <div class="logo">🎙️ NarrativeAI</div>
-        <div><a href="#features">Features</a><a href="#faq">FAQ</a></div>
-    </nav>
+    <div class="nav">
+        <h1>🎙️ NarrativeAI</h1>
+    </div>
+    
     <div class="hero">
-        <h1>Turn Your PDF into an Audiobook</h1>
-        <p>Convert documents to high-quality MP3 audio instantly</p>
+        <h2>Turn Your PDF into an Audiobook</h2>
+        <p>Convert to high-quality MP3 instantly</p>
     </div>
+    
     <div class="container">
-        <div class="app-section">
-            <div id="status-box" class="status-box">Loading...</div>
-            <h2 style="color: #667eea; margin-bottom: 20px;">📄 Upload Your PDF</h2>
-            <div class="upload-box" id="upload-box" onclick="document.getElementById('pdf-file').click();">
-                <div style="font-size: 48px; margin-bottom: 10px;">📤</div>
-                <p><strong>Click to upload or drag & drop</strong></p>
-                <p style="font-size: 12px; color: #666;">PDF files up to 150MB</p>
+        <div class="box">
+            <div class="status" id="status">Loading...</div>
+            
+            <h3>📄 Select PDF File</h3>
+            <div class="upload" id="uploadBox">
+                <div style="font-size: 40px;">📤</div>
+                <p><strong>Click here to select PDF</strong></p>
+                <p style="font-size: 12px; color: #666;">Max 150MB</p>
             </div>
-            <input type="file" id="pdf-file" accept=".pdf" style="display: none;" onchange="handleFileSelect(event)">
-            <div class="controls" id="controls">
-                <div class="form-group">
-                    <label for="voice-select">🎙️ Select Voice:</label>
-                    <select id="voice-select">
-                        <option value="Joanna">Joanna (Female, US)</option>
-                        <option value="Matthew">Matthew (Male, US)</option>
-                        <option value="Justin">Justin (Male, US)</option>
-                        <option value="Ivy">Ivy (Female, US)</option>
-                        <option value="Kendra">Kendra (Female, US)</option>
+            <input type="file" id="pdf-file" accept=".pdf">
+            
+            <div class="options" id="options">
+                <div class="opt-group">
+                    <label>🎤 Voice</label>
+                    <select id="voice">
+                        <option value="Joanna">Joanna</option>
+                        <option value="Matthew">Matthew</option>
                     </select>
                 </div>
-                <div class="form-group">
-                    <label for="voice-rate">⚡ Speed:</label>
-                    <select id="voice-rate">
-                        <option value="80">Slow (80%)</option>
-                        <option value="90" selected>Normal (90%)</option>
-                        <option value="100">Fast (100%)</option>
+                <div class="opt-group">
+                    <label>⚡ Speed</label>
+                    <select id="speed">
+                        <option value="90" selected>Normal</option>
+                        <option value="100">Fast</option>
                     </select>
                 </div>
-                <button class="btn btn-primary" id="convert-btn" onclick="handleConvert()" disabled>🚀 Convert</button>
+                <button class="btn btn-convert" id="convertBtn" disabled>🚀 Convert</button>
             </div>
-            <div class="tier-info" id="tier-info">✅ Audio Only | 💰 £1 per conversion</div>
-            <div class="download-section" id="download-section">
-                <div class="progress-container">
-                    <div class="progress-label">📊 Progress: <span id="job-progress">0</span>%</div>
-                    <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width: 0%;"></div></div>
+            
+            <div class="price" id="price">✅ Audio Only • £1 per conversion</div>
+            
+            <div class="progress" id="progress">
+                <div>Progress: <span id="percent">0</span>%</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="fill" style="width: 0%;"></div>
                 </div>
-                <div class="download-buttons">
-                    <button id="audio-download-btn" class="download-btn" onclick="downloadAudio()" disabled>🎵 Download Audio (MP3)</button>
-                </div>
             </div>
-        </div>
-        <div id="features" class="faq" style="margin-top: 80px;">
-            <h2>✨ Features</h2>
-            <div style="background: white; padding: 30px; border-radius: 12px;">
-                <ul style="list-style: none;">
-                    <li style="padding: 10px 0;">✅ Natural-sounding voices</li>
-                    <li style="padding: 10px 0;">✅ Multiple voice options</li>
-                    <li style="padding: 10px 0;">✅ Adjustable speech speed</li>
-                    <li style="padding: 10px 0;">✅ High-quality MP3 output</li>
-                    <li style="padding: 10px 0;">✅ Fast processing</li>
-                    <li style="padding: 10px 0;">✅ Supports large PDFs (up to 150MB)</li>
-                </ul>
-            </div>
-        </div>
-        <div id="faq" class="faq">
-            <h2>❓ FAQ</h2>
-            <div class="faq-item">
-                <div class="faq-question" onclick="toggleFAQ(this)">How much does it cost? <span>+</span></div>
-                <div class="faq-answer">5 free conversions per day, then £1 each!</div>
-            </div>
-            <div class="faq-item">
-                <div class="faq-question" onclick="toggleFAQ(this)">How long does it take? <span>+</span></div>
-                <div class="faq-answer">Most PDFs convert in 1-3 minutes.</div>
-            </div>
-            <div class="faq-item">
-                <div class="faq-question" onclick="toggleFAQ(this)">File size limits? <span>+</span></div>
-                <div class="faq-answer">PDF files up to 150MB supported.</div>
+            
+            <div class="download" id="download">
+                <button class="btn btn-download" id="downloadBtn" disabled>🎵 Download MP3</button>
             </div>
         </div>
     </div>
-    <footer><p>© 2026 NarrativeAI. PDF to Audiobook Converter.</p></footer>
+    
+    <footer>© 2026 NarrativeAI</footer>
+
     <script>
-        let currentJobId = null;
-        async function checkFreeTier() {
+    const uploadBox = document.getElementById('uploadBox');
+    const fileInput = document.getElementById('pdf-file');
+    const convertBtn = document.getElementById('convertBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const status = document.getElementById('status');
+    const options = document.getElementById('options');
+    const price = document.getElementById('price');
+    const progress = document.getElementById('progress');
+    const download = document.getElementById('download');
+    
+    let currentJobId = null;
+    let freeLeft = 0;
+    
+    uploadBox.onclick = function() {
+        fileInput.click();
+    };
+    
+    fileInput.onchange = function() {
+        const file = this.files[0];
+        if (file && file.name.endsWith('.pdf')) {
+            uploadBox.classList.add('done');
+            uploadBox.innerHTML = '✅<p style="color: #28a745; margin-top: 10px;"><strong>' + file.name + '</strong></p>';
+            options.classList.add('show');
+            price.classList.add('show');
+            if (freeLeft > 0) convertBtn.disabled = false;
+        }
+    };
+    
+    convertBtn.onclick = async function() {
+        const file = fileInput.files[0];
+        if (!file) return;
+        
+        convertBtn.disabled = true;
+        convertBtn.textContent = '⏳ Converting...';
+        
+        const form = new FormData();
+        form.append('pdf_file', file);
+        form.append('voice', document.getElementById('voice').value);
+        form.append('rate', document.getElementById('speed').value);
+        form.append('tier', 'audio_only');
+        
+        try {
+            const res = await fetch('/upload', { method: 'POST', body: form });
+            const data = await res.json();
+            currentJobId = data.job_id;
+            progress.classList.add('show');
+            download.classList.add('show');
+            pollStatus();
+        } catch (e) {
+            alert('Error: ' + e);
+            convertBtn.disabled = false;
+            convertBtn.textContent = '🚀 Convert';
+        }
+    };
+    
+    function pollStatus() {
+        const timer = setInterval(async function() {
             try {
-                const r = await fetch("/api/free-tier");
-                const d = await r.json();
-                document.getElementById("status-box").innerHTML = `✅ ${d.remaining} free conversions today`;
-                if (d.remaining > 0) document.getElementById("convert-btn").disabled = false;
-            } catch (e) { console.error(e); }
+                const res = await fetch('/jobs/' + currentJobId);
+                const data = await res.json();
+                document.getElementById('percent').textContent = data.progress;
+                document.getElementById('fill').style.width = data.progress + '%';
+                if (data.status === 'completed') {
+                    clearInterval(timer);
+                    downloadBtn.disabled = false;
+                }
+            } catch (e) {}
+        }, 1000);
+    }
+    
+    downloadBtn.onclick = async function() {
+        if (!currentJobId) return;
+        try {
+            const res = await fetch('/download/' + currentJobId + '?type=audio');
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'audiobook.mp3';
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            alert('Download error');
         }
-        function handleFileSelect(e) {
-            const f = e.target.files[0];
-            if (!f || !f.name.endsWith(".pdf")) { alert("Select PDF"); return; }
-            document.getElementById("upload-box").classList.add("active");
-            document.getElementById("upload-box").innerHTML = `✅<p style="color: #28a745; margin-top: 10px;"><strong>${f.name}</strong></p>`;
-            document.getElementById("controls").classList.add("active");
-            document.getElementById("tier-info").classList.add("active");
+    };
+    
+    async function init() {
+        try {
+            const res = await fetch('/api/free-tier');
+            const data = await res.json();
+            freeLeft = data.remaining;
+            status.innerHTML = '✅ ' + freeLeft + ' free conversions today';
+            if (freeLeft > 0) convertBtn.disabled = false;
+        } catch (e) {
+            status.innerHTML = 'Error loading status';
         }
-        async function handleConvert() {
-            const f = document.getElementById("pdf-file").files[0];
-            if (!f) { alert("Select PDF"); return; }
-            const voice = document.getElementById("voice-select").value;
-            const rate = document.getElementById("voice-rate").value;
-            const b = document.getElementById("convert-btn");
-            b.disabled = true;
-            b.textContent = "⏳ Converting...";
-            try {
-                const fd = new FormData();
-                fd.append("pdf_file", f);
-                fd.append("voice", voice);
-                fd.append("rate", rate);
-                fd.append("tier", "audio_only");
-                const r = await fetch("/upload", { method: "POST", body: fd });
-                if (r.ok) {
-                    const a = await r.json();
-                    currentJobId = a.job_id;
-                    document.getElementById("download-section").classList.add("active");
-                    pollJobStatus(currentJobId);
-                } else { alert("Failed"); b.disabled = false; b.textContent = "🚀 Convert"; }
-            } catch (e) { alert("Error: " + e.message); b.disabled = false; b.textContent = "🚀 Convert"; }
-        }
-        async function pollJobStatus(j) {
-            const i = setInterval(async () => {
-                try {
-                    const r = await fetch("/jobs/" + j);
-                    const d = await r.json();
-                    document.getElementById("job-progress").textContent = d.progress;
-                    document.getElementById("progress-fill").style.width = d.progress + "%";
-                    if (d.status === "completed") { clearInterval(i); document.getElementById("audio-download-btn").disabled = false; }
-                } catch (e) { }
-            }, 1000);
-        }
-        async function downloadAudio() {
-            if (!currentJobId) return;
-            try {
-                const r = await fetch("/download/" + currentJobId + "?type=audio");
-                const b = await r.blob();
-                const u = URL.createObjectURL(b);
-                const a = document.createElement("a");
-                a.href = u;
-                a.download = "audiobook.mp3";
-                a.click();
-                URL.revokeObjectURL(u);
-            } catch (e) { alert("Error"); }
-        }
-        function toggleFAQ(e) {
-            const a = e.nextElementSibling;
-            a.classList.toggle("active");
-            e.querySelector("span").textContent = a.classList.contains("active") ? "−" : "+";
-        }
-        window.addEventListener("load", checkFreeTier);
+    }
+    
+    init();
     </script>
 </body>
 </html>
