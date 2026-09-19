@@ -161,26 +161,33 @@
     convertBtn.onclick = async function() {
         const file = fileInput.files[0];
         if (!file) return;
-        
+
         convertBtn.disabled = true;
         convertBtn.textContent = '⏳ Converting...';
-        
+
         const form = new FormData();
-        form.append('pdf_file', file);
+        form.append('file', file);  // FIXED: Changed from 'pdf_file' to 'file'
         form.append('voice', document.getElementById('voice').value);
         form.append('character', document.getElementById('character').value);
         form.append('emotion', document.getElementById('emotion').value);
         form.append('rate', document.getElementById('speed').value);
         form.append('tier', 'audio_only');
-        
+
         try {
             const res = await fetch('/upload', { method: 'POST', body: form });
+            if (!res.ok) {
+                const error = await res.json();
+                alert('Upload failed: ' + (error.detail || error.message || 'Unknown error'));
+                throw new Error(`HTTP ${res.status}`);
+            }
             const data = await res.json();
+            console.log('📤 Upload successful! Job ID:', data.job_id);
             currentJobId = data.job_id;
             progress.classList.add('show');
             download.classList.add('show');
             pollStatus();
         } catch (e) {
+            console.error('💥 Upload error:', e);
             alert('Error: ' + e);
             convertBtn.disabled = false;
             convertBtn.textContent = '🚀 Convert';
