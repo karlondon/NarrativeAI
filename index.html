@@ -190,25 +190,36 @@
     function pollStatus() {
         const timer = setInterval(async function() {
             try {
+                console.log('📡 Polling job:', currentJobId);
                 const res = await fetch('/jobs/' + currentJobId);
                 if (!res.ok) {
-                    console.error('Status check failed:', res.status);
+                    console.error('❌ Status check failed:', res.status, res.statusText);
                     return;
                 }
                 const data = await res.json();
-                console.log('Job progress:', data.progress, 'Status:', data.status);
-                document.getElementById('percent').textContent = data.progress;
-                document.getElementById('fill').style.width = data.progress + '%';
+                console.log('✅ Job data received:', JSON.stringify(data));
+                console.log('📊 Progress:', data.progress, 'Status:', data.status);
+                
+                if (data.progress !== undefined && data.progress !== null) {
+                    document.getElementById('percent').textContent = data.progress;
+                    document.getElementById('fill').style.width = data.progress + '%';
+                    console.log('📈 Updated bar to', data.progress + '%');
+                } else {
+                    console.warn('⚠️ No progress field in response:', data);
+                }
+                
                 if (data.status === 'completed') {
                     clearInterval(timer);
                     downloadBtn.disabled = false;
                     progress.innerHTML += '<p style="color: #28a745; margin-top: 10px; font-weight: bold;">✅ Conversion complete!</p>';
+                    console.log('✅ Job completed!');
                 } else if (data.status === 'failed') {
                     clearInterval(timer);
-                    progress.innerHTML += '<p style="color: #d32f2f; margin-top: 10px; font-weight: bold;">❌ Conversion failed</p>';
+                    progress.innerHTML += '<p style="color: #d32f2f; margin-top: 10px; font-weight: bold;">❌ Conversion failed: ' + (data.error || 'Unknown error') + '</p>';
+                    console.error('❌ Job failed:', data.error);
                 }
             } catch (e) {
-                console.error('Poll error:', e);
+                console.error('💥 Poll error:', e);
             }
         }, 1000);
     }
