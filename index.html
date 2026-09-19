@@ -52,13 +52,13 @@
         <div class="box">
             <div class="status" id="status">Loading...</div>
             
-            <h3>📄 Select PDF File</h3>
+            <h3>📄 Select Text File</h3>
             <div class="upload" id="uploadBox">
                 <div style="font-size: 40px;">📤</div>
-                <p><strong>Click here to select PDF</strong></p>
-                <p style="font-size: 12px; color: #666;">Max 150MB</p>
+                <p><strong>Click here to select file</strong></p>
+                <p style="font-size: 12px; color: #666;">PDF, TXT, DOCX, DOC, RTF (max 150MB)</p>
             </div>
-            <input type="file" id="pdf-file" accept=".pdf">
+            <input type="file" id="pdf-file" accept=".pdf,.txt,.docx,.doc,.rtf">
             
             <div class="options" id="options">
                 <div class="opt-group">
@@ -144,12 +144,17 @@
     
     fileInput.onchange = function() {
         const file = this.files[0];
-        if (file && file.name.endsWith('.pdf')) {
+        const validExtensions = ['.pdf', '.txt', '.docx', '.doc', '.rtf'];
+        const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
+        
+        if (file && validExtensions.includes(fileExtension)) {
             uploadBox.classList.add('done');
             uploadBox.innerHTML = '✅<p style="color: #28a745; margin-top: 10px;"><strong>' + file.name + '</strong></p>';
             options.classList.add('show');
             price.classList.add('show');
             if (freeLeft > 0) convertBtn.disabled = false;
+        } else {
+            alert('Please select a valid text file (PDF, TXT, DOCX, DOC, or RTF)');
         }
     };
     
