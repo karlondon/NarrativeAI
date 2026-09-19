@@ -457,7 +457,61 @@ async def upload(
     bg.add_task(run_process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice, tier)
     return {"job_id": jid, "status": "pending", "progress": 0, "tier": tier}
 
-@app.get("/jobs/{jid}")
+@app.get("/api/test-job")
+async def test_job():
+    """Test endpoint to manually trigger a job and see progress"""
+    jid = f"test_{int(time.time())}"
+    with jobs_lock:
+        jobs[jid] = {
+            "id": jid,
+            "status": "pending",
+            "file": "test.txt",
+            "filename": "test",
+            "progress": 0,
+            "tier": "audio_only"
+        }
+        save_jobs_to_disk(jobs)
+    
+    # Manually simulate progress updates
+    async def simulate_progress():
+        await asyncio.sleep(1)
+        with jobs_lock:
+            jobs[jid]["status"] = "processing"
+            jobs[jid]["progress"] = 25
+            save_jobs_to_disk(jobs)
+        
+        await asyncio.sleep(1)
+        with jobs_lock:
+            jobs[jid]["progress"] = 50
+            save_jobs_to_disk(jobs)
+        
+        await asyncio.sleep(1)
+        with jobs_lock:
+            jobs[jid]["progress"] = 75
+            save_jobs_to_disk(jobs)
+        
+        await asyncio.sleep(1)
+        with jobs_lock:
+            jobs[jid]["status"] = "completed"
+            jobs[jid]["progress"] = 100
+            save_jobs_to_disk(jobs)
+        
+        logger.info(f"✅ Test job {jid} completed")
+    
+    bg.add_task(simulate_progress)
+    logger.info(f"🧪 Test job created: {jid}")
+    return {"job_id": jid, "status": "pending", "progress": 0, "message": "Test job started - watch progress update"}
+
+@app.get("/api/check-polly")
+async def check_polly():
+    """Check if AWS Polly is configured"""
+    polly = get_polly_client()
+    if polly:
+        return {"status": "OK", "message": "AWS Polly is configured and working"}
+    else:
+        return {"status": "ERROR", "message": "AWS Polly is NOT configured. Check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"}
+
+
 async def status(jid: str):
     with jobs_lock:
         job = jobs.get(jid)
