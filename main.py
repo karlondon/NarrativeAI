@@ -417,8 +417,10 @@ async def upload(
     
     logger.info(f"✅ After cleaning - tier: '{tier}'")
     
-    if not file.filename.endswith('.pdf'):
-        raise HTTPException(400, "Only PDF files are supported")
+    # Validate file extension - accept PDF, TXT, DOCX, DOC, RTF
+    valid_extensions = ('.pdf', '.txt', '.docx', '.doc', '.rtf')
+    if not file.filename.lower().endswith(valid_extensions):
+        raise HTTPException(400, f"Invalid file type. Supported formats: PDF, TXT, DOCX, DOC, RTF")
     
     # Validate tier
     if not is_valid_tier(tier):
@@ -435,8 +437,10 @@ async def upload(
     # Create job ID
     import uuid
     jid = f"job_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-    pdf_filename = file.filename.replace('.pdf', '')
-    (UPLOAD_DIR / f"{jid}.pdf").write_bytes(content)
+    # Extract file extension and preserve it
+    file_ext = file.filename.lower().split('.')[-1]
+    stored_filename = f"{jid}.{file_ext}"
+    (UPLOAD_DIR / stored_filename).write_bytes(content)
     
     with jobs_lock:
         jobs[jid] = {
@@ -651,36 +655,76 @@ def detect_speaker(text: str, segment_index: int = 0) -> tuple:
     
     return voice_id
 
-def extract_segments(pdf_path: Path) -> list:
+def extract_segments(file_path: Path) -> list:
+    """Extract text segments from various file formats (PDF, TXT, DOCX, DOC, RTF)"""
     segments = []
     try:
-        with pdfplumber.open(pdf_path) as pdf:
-            logger.info(f"📖 Opening PDF: {pdf_path}, Pages: {len(pdf.pages)}")
-            segment_index = 0
-            for page_num, page in enumerate(pdf.pages):
-                text = page.extract_text()
-                if text:
-                    page_segments = 0
-                    for para in text.split('\n\n'):
-                        if para.strip():
-                            # detect_speaker now returns only voice_id
-                            voice_id = detect_speaker(para, segment_index)
-                            segments.append({
-                                "text": para.strip(), 
-                                "voice_id": voice_id,
-                                "page": page_num + 1
-                            })
-                            segment_index += 1
-                            page_segments += 1
-                    logger.info(f"Page {page_num + 1}: Extracted {page_segments} paragraphs")
-            logger.info(f"✅ Total segments extracted: {len(segments)}")
+        file_ext = file_path.suffix.lower()
+        text_content = ""
+        
+        if file_ext == '.pdf':
+            # Handle PDF files
+            with pdfplumber.open(file_path) as pdf:
+                logger.info(f"📖 Opening PDF: {file_path}, Pages: {len(pdf.pages)}")
+                for page_num, page in enumerate(pdf.pages):
+                    page_text = page.extract_text()
+                    if page_text:
+                        text_content += f"\n\n[PAGE {page_num + 1}]\n{page_text}"
+                        
+        elif file_ext == '.txt':
+            # Handle plain text files
+            text_content = file_path.read_text(encoding='utf-8', errors='ignore')
+            logger.info(f"📄 Opened TXT file: {file_path}")
+            
+        elif file_ext in ('.docx', '.doc'):
+            # Handle Word documents
+            try:
+                from docx import Document
+                doc = Document(file_path)
+                text_content = '\n\n'.join([para.text for para in doc.paragraphs if para.text.strip()])
+                logger.info(f"📋 Opened Word document: {file_path}")
+            except ImportError:
+                logger.error("python-docx not installed. Cannot process .docx files")
+                raise Exception("Word document support requires: pip install python-docx")
+                
+        elif file_ext == '.rtf':
+            # Handle RTF files - strip RTF formatting
+            try:
+                from striprtf.striprtf import rtf_to_text
+                rtf_content = file_path.read_text(encoding='utf-8', errors='ignore')
+                text_content = rtf_to_text(rtf_content)
+                logger.info(f"📝 Opened RTF file: {file_path}")
+            except ImportError:
+                logger.error("striprtf not installed. Cannot process .rtf files")
+                raise Exception("RTF support requires: pip install striprtf")
+        else:
+            raise ValueError(f"Unsupported file format: {file_ext}")
+        
+        if not text_content.strip():
+            raise ValueError(f"No text extracted from {file_path.name}")
+        
+        # Parse text into segments
+        segment_index = 0
+        for para in text_content.split('\n\n'):
+            if para.strip():
+                voice_id = detect_speaker(para, segment_index)
+                segments.append({
+                    "text": para.strip(), 
+                    "voice_id": voice_id,
+                    "page": 1
+                })
+                segment_index += 1
+        
+        logger.info(f"✅ Total segments extracted: {len(segments)} from {file_path.name}")
+        
     except Exception as e:
-        logger.error(f"❌ PDF extraction error: {e}", exc_info=True)
+        logger.error(f"❌ File extraction error: {e}", exc_info=True)
         raise
+    
     return segments
 
 def run_process_pdf(jid: str, path: Path, use_multi_voice: bool = True, tier: str = "audio_only"):
-    """Wrapper to run async process_pdf in background task"""
+    """Wrapper to run async process_pdf in background task - handles PDF, TXT, DOCX, DOC, RTF"""
     print(f"🚀 BACKGROUND TASK STARTED for {jid}")
     print(f"File path: {path}, exists: {path.exists()}")
     logger.info(f"🚀 BACKGROUND TASK STARTED for {jid}")
