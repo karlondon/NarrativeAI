@@ -511,7 +511,7 @@ async def check_polly():
     else:
         return {"status": "ERROR", "message": "AWS Polly is NOT configured. Check AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"}
 
-
+@app.get("/jobs/{jid}")
 async def status(jid: str):
     with jobs_lock:
         job = jobs.get(jid)
