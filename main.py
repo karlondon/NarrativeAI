@@ -461,7 +461,9 @@ async def upload(
     logger.info(f"   - tier: {tier}")
     logger.info(f"   - voice: {voice}")
     
-    bg.add_task(run_process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice, tier)
+    # Pass the correct file path with actual extension
+    file_path = UPLOAD_DIR / stored_filename
+    bg.add_task(run_process_pdf, jid, file_path, multi_voice, tier)
     return {"job_id": jid, "status": "pending", "progress": 0, "tier": tier}
 
 @app.get("/api/test-job")
