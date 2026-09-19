@@ -442,12 +442,15 @@ async def upload(
     stored_filename = f"{jid}.{file_ext}"
     (UPLOAD_DIR / stored_filename).write_bytes(content)
     
+    # Get filename without extension
+    filename_without_ext = file.filename.rsplit('.', 1)[0]
+    
     with jobs_lock:
         jobs[jid] = {
             "id": jid, 
             "status": "pending", 
             "file": file.filename, 
-            "filename": pdf_filename, 
+            "filename": filename_without_ext, 
             "progress": 0,
             "tier": tier
         }
