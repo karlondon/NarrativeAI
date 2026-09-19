@@ -64,13 +64,42 @@
                 <div class="opt-group">
                     <label>🎤 Voice</label>
                     <select id="voice">
-                        <option value="Joanna">Joanna</option>
-                        <option value="Matthew">Matthew</option>
+                        <option value="Joanna">Joanna (Friendly)</option>
+                        <option value="Matthew">Matthew (Professional)</option>
+                        <option value="Justin">Justin (Warm)</option>
+                        <option value="Ivy">Ivy (Bright)</option>
+                        <option value="Kendra">Kendra (Upbeat)</option>
+                        <option value="Joey">Joey (Cheerful)</option>
+                        <option value="Raveena">Raveena (Sophisticated)</option>
+                    </select>
+                </div>
+                <div class="opt-group">
+                    <label>😊 Character</label>
+                    <select id="character">
+                        <option value="neutral" selected>Neutral</option>
+                        <option value="narrator">Narrator</option>
+                        <option value="excited">Excited</option>
+                        <option value="calm">Calm</option>
+                        <option value="dramatic">Dramatic</option>
+                        <option value="conversational">Conversational</option>
+                    </select>
+                </div>
+                <div class="opt-group">
+                    <label>❤️ Emotion</label>
+                    <select id="emotion">
+                        <option value="neutral" selected>Neutral</option>
+                        <option value="happy">Happy</option>
+                        <option value="sad">Sad</option>
+                        <option value="angry">Angry</option>
+                        <option value="surprised">Surprised</option>
+                        <option value="sincere">Sincere</option>
+                        <option value="thoughtful">Thoughtful</option>
                     </select>
                 </div>
                 <div class="opt-group">
                     <label>⚡ Speed</label>
                     <select id="speed">
+                        <option value="80">Slow</option>
                         <option value="90" selected>Normal</option>
                         <option value="100">Fast</option>
                     </select>
@@ -134,6 +163,8 @@
         const form = new FormData();
         form.append('pdf_file', file);
         form.append('voice', document.getElementById('voice').value);
+        form.append('character', document.getElementById('character').value);
+        form.append('emotion', document.getElementById('emotion').value);
         form.append('rate', document.getElementById('speed').value);
         form.append('tier', 'audio_only');
         
