@@ -44,8 +44,8 @@
     </div>
     
     <div class="hero">
-        <h2>Turn Your PDF into an Audiobook</h2>
-        <p>Convert to high-quality MP3 instantly</p>
+        <h2>Turn Your Text Files into an Audiobook</h2>
+        <p>Convert documents to high-quality MP3 audio instantly</p>
     </div>
     
     <div class="container">
@@ -191,14 +191,25 @@
         const timer = setInterval(async function() {
             try {
                 const res = await fetch('/jobs/' + currentJobId);
+                if (!res.ok) {
+                    console.error('Status check failed:', res.status);
+                    return;
+                }
                 const data = await res.json();
+                console.log('Job progress:', data.progress, 'Status:', data.status);
                 document.getElementById('percent').textContent = data.progress;
                 document.getElementById('fill').style.width = data.progress + '%';
                 if (data.status === 'completed') {
                     clearInterval(timer);
                     downloadBtn.disabled = false;
+                    progress.innerHTML += '<p style="color: #28a745; margin-top: 10px; font-weight: bold;">✅ Conversion complete!</p>';
+                } else if (data.status === 'failed') {
+                    clearInterval(timer);
+                    progress.innerHTML += '<p style="color: #d32f2f; margin-top: 10px; font-weight: bold;">❌ Conversion failed</p>';
                 }
-            } catch (e) {}
+            } catch (e) {
+                console.error('Poll error:', e);
+            }
         }, 1000);
     }
     
