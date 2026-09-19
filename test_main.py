@@ -24,8 +24,8 @@ def test_upload_pdf_missing():
     assert response.status_code == 422
 
 def test_upload_wrong_type():
-    """Test upload with wrong file type"""
-    response = client.post("/upload", files={"file": ("test.txt", b"text content")})
+    """Test upload with wrong file type - should reject .exe files"""
+    response = client.post("/upload", files={"file": ("test.exe", b"binary content")})
     assert response.status_code == 400
 
 def test_job_not_found():
