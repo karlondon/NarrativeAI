@@ -1,5 +1,4 @@
 import os, logging, time, re, subprocess, asyncio, threading, json, uuid, hashlib
-from d_id_client import get_did_client
 from pricing_config import is_valid_tier, get_tier_info
 from datetime import datetime
 from pathlib import Path
@@ -24,7 +23,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="NarrativeAI", version="0.4.0")
+app = FastAPI(title="NarrativeAI", version="0.5.0-audio-only")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # ===== FREEMIUM CONFIG =====
@@ -40,11 +39,8 @@ SQUARE_LOCATION_ID = os.getenv('SQUARE_LOCATION_ID')
 SQUARE_ENVIRONMENT = os.getenv('SQUARE_ENVIRONMENT', 'production')
 SQUARE_AVAILABLE = bool(os.getenv('SQUARE_ACCESS_TOKEN') and os.getenv('SQUARE_APPLICATION_ID'))
 
-# D-ID Video Generation
-D_ID_CLIENT = get_did_client()
-D_ID_AVAILABLE = D_ID_CLIENT is not None
-if D_ID_AVAILABLE:
-    logger.info("✅ D-ID video generation enabled")
+# Audio-only mode (no video generation)
+logger.info("✅ NarrativeAI running in Audio-Only mode")
 
 
 def get_square_client():
@@ -426,8 +422,9 @@ async def upload(
     
     # Validate tier
     if not is_valid_tier(tier):
-        logger.error(f"❌ Invalid tier: '{tier}'. Valid: audio_only, video_addon, premium_bundle")
-        raise HTTPException(400, f"Invalid tier: {tier}. Must be one of: audio_only, video_addon, premium_bundle")
+        logger.error(f"❌ Invalid tier: '{tier}'. Valid: audio_only")
+        raise HTTPException(400, f"Invalid tier: {tier}. Must be: audio_only")
+
     
     content = await file.read()
     # Max file size: 150MB
@@ -441,8 +438,6 @@ async def upload(
     pdf_filename = file.filename.replace('.pdf', '')
     (UPLOAD_DIR / f"{jid}.pdf").write_bytes(content)
     
-    include_video = tier in ["video_addon", "premium_bundle"]
-    
     with jobs_lock:
         jobs[jid] = {
             "id": jid, 
@@ -450,20 +445,17 @@ async def upload(
             "file": file.filename, 
             "filename": pdf_filename, 
             "progress": 0,
-            "tier": tier,
-            "include_video": include_video,
-            "video_status": None,
-            "video_id": None
+            "tier": tier
         }
         save_jobs_to_disk(jobs)
+
     
     logger.info(f"✅ JOB CREATED: {jid}")
     logger.info(f"   - tier: {tier}")
-    logger.info(f"   - include_video: {include_video}")
     logger.info(f"   - voice: {voice}")
     
     bg.add_task(run_process_pdf, jid, UPLOAD_DIR / f"{jid}.pdf", multi_voice, tier)
-    return {"job_id": jid, "status": "pending", "tier": tier, "include_video": include_video}
+    return {"job_id": jid, "status": "pending", "tier": tier}
 
 @app.get("/jobs/{jid}")
 async def status(jid: str):
@@ -491,41 +483,6 @@ async def download(jid: str):
     logger.info(f"✅ Download: Sending {filename} ({f.stat().st_size / 1024 / 1024:.1f}MB)")
     return FileResponse(f, filename=filename, media_type="audio/mpeg")
 
-@app.get("/video-status/{job_id}")
-async def get_video_status(job_id: str):
-    """Get D-ID video generation status"""
-    if not D_ID_AVAILABLE:
-        raise HTTPException(503, "Video generation service unavailable")
-    
-    if job_id not in jobs:
-        raise HTTPException(404, "Job not found")
-    
-    job = jobs[job_id]
-    if not job.get("include_video"):
-        raise HTTPException(400, "This job does not have video generation enabled")
-    
-    if not job.get("video_id"):
-        return {
-            "status": "pending",
-            "message": "Video generation not yet started"
-        }
-    
-    try:
-        status_result = D_ID_CLIENT.get_status(job["video_id"])
-        
-        with jobs_lock:
-            jobs[job_id]["video_status"] = status_result.get("status")
-            save_jobs_to_disk(jobs)
-        
-        return {
-            "video_id": job["video_id"],
-            "status": status_result.get("status"),
-            "result_url": status_result.get("result_url") if status_result.get("status") == "completed" else None
-        }
-    except Exception as e:
-        logger.error(f"❌ Error getting video status: {e}")
-        raise HTTPException(500, f"Error checking video status: {str(e)}")
-
 @app.get("/download/{job_id}")
 async def download_file(job_id: str, type: str = "audio"):
     """Download audio or video file. Type: 'audio' or 'video'"""
@@ -549,32 +506,11 @@ async def download_file(job_id: str, type: str = "audio"):
         return FileResponse(f, filename=filename, media_type="audio/mpeg")
     
     elif type == "video":
-        # Download video MP4
-        if not job.get("include_video"):
-            raise HTTPException(400, "This job does not include video")
-        
-        if not job.get("video_id"):
-            raise HTTPException(400, "Video not yet generated")
-        
-        # Get video status
-        try:
-            status_result = D_ID_CLIENT.get_status(job["video_id"])
-            if status_result.get("status") != "completed":
-                raise HTTPException(400, f"Video not yet ready: {status_result.get('status')}")
-            
-            # Return the video URL from D-ID
-            video_url = status_result.get("result_url")
-            if not video_url:
-                raise HTTPException(500, "Video URL not available from D-ID")
-            
-            logger.info(f"✅ Download: Video ready for {job_id}")
-            return {"video_url": video_url, "status": "completed"}
-        except Exception as e:
-            logger.error(f"❌ Error downloading video: {e}")
-            raise HTTPException(500, f"Error retrieving video: {str(e)}")
+        raise HTTPException(400, "Video downloads are not available in audio-only mode")
     
     else:
-        raise HTTPException(400, "Invalid type. Must be 'audio' or 'video'")
+        raise HTTPException(400, "Invalid type. Must be 'audio'")
+
 
 def detect_speaker(text: str, segment_index: int = 0) -> tuple:
     """
@@ -864,51 +800,6 @@ async def process_pdf(jid: str, path: Path, use_multi_voice: bool = True, tier: 
                 audio_files[0].rename(OUTPUT_DIR / f"{jid}.mp3")
                 for af in audio_files[1:]:
                     af.unlink(missing_ok=True)
-        
-        # Now handle video generation if tier includes it
-        if tier in ["video_addon", "premium_bundle"] and D_ID_AVAILABLE:
-            logger.info(f"Job {jid}: Starting D-ID video generation for tier: {tier}")
-            with jobs_lock:
-                jobs[jid]["progress"] = 95
-                save_jobs_to_disk(jobs)
-            
-            try:
-                # Audio URL must be publicly accessible
-                audio_url = f"https://narrativeai.myblognow.uk/download/{jid}?type=audio"
-                
-                logger.info(f"Calling D-ID API with audio_url: {audio_url}")
-                
-                # Create D-ID video
-                video_result = D_ID_CLIENT.create_video(
-                    audio_url=audio_url,
-                    avatar="morgan-png",  # D-ID avatar preset
-                    name=f"NarrativeAI-{jid}"
-                )
-                
-                logger.info(f"D-ID API Response: {video_result}")
-                
-                # Fix: D-ID client returns "video_id" not "id"
-                video_id = video_result.get("video_id")
-                logger.info(f"Extracted video_id: {video_id}, full response keys: {list(video_result.keys())}")
-                
-                if video_id:
-                    logger.info(f"✅ D-ID video creation initiated: {video_id}")
-                    with jobs_lock:
-                        jobs[jid]["video_id"] = video_id
-                        jobs[jid]["video_status"] = "processing"
-                        save_jobs_to_disk(jobs)
-                else:
-                    logger.error(f"❌ D-ID video creation failed: no video ID returned. Response: {video_result}")
-                    with jobs_lock:
-                        jobs[jid]["video_status"] = "failed"
-                        jobs[jid]["video_error"] = f"No video ID in response: {video_result}"
-                        save_jobs_to_disk(jobs)
-            except Exception as e:
-                logger.error(f"❌ D-ID video generation error: {e}")
-                with jobs_lock:
-                    jobs[jid]["video_status"] = "failed"
-                    jobs[jid]["error"] = f"Video generation failed: {str(e)}"
-                    save_jobs_to_disk(jobs)
         
         with jobs_lock:
             jobs[jid]["status"] = "completed"

@@ -3,310 +3,202 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NarrativeAI - PDF to Audiobook & Video</title>
+    <title>NarrativeAI - PDF to Audiobook</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: Arial, sans-serif; background: #f5f5f5; color: #333; line-height: 1.6; }
-        nav { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+        body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #333; line-height: 1.6; min-height: 100vh; }
+        nav { background: rgba(0,0,0,0.2); padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
         .logo { color: white; font-size: 24px; font-weight: bold; }
         nav a { color: white; text-decoration: none; margin-left: 30px; font-weight: 600; }
-        .hero { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 80px 30px; text-align: center; }
-        .hero h1 { font-size: 48px; margin-bottom: 30px; opacity: 0.9; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 40px 20px; }
-        .status-box { background: #e7f3ff; color: #0066cc; padding: 15px; border-radius: 5px; margin-bottom: 20px; text-align: center; font-weight: bold; }
-        .app-section { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 60px 0; }
-        .app-section h2 { color: #667eea; margin-bottom: 20px; font-size: 28px; }
-        .upload-box { border: 3px dashed #667eea; padding: 40px; text-align: center; border-radius: 8px; background: #f9f9f9; cursor: pointer; transition: all 0.3s; }
-        .upload-box:hover { border-color: #764ba2; background: #f0f0f0; }
+        .hero { color: white; padding: 60px 30px; text-align: center; }
+        .hero h1 { font-size: 48px; margin-bottom: 20px; }
+        .hero p { font-size: 18px; opacity: 0.9; }
+        .container { max-width: 800px; margin: 40px auto; padding: 0 20px; }
+        .app-section { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+        .status-box { background: #e7f3ff; color: #0066cc; padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: center; font-weight: bold; }
+        .upload-box { border: 3px dashed #667eea; padding: 40px; text-align: center; border-radius: 12px; background: #f9f9f9; cursor: pointer; transition: all 0.3s; }
+        .upload-box:hover { border-color: #764ba2; }
         .upload-box.active { border-color: #28a745; background: #f0fff4; }
         .controls { display: none; margin: 20px 0; gap: 15px; flex-wrap: wrap; align-items: flex-end; }
         .controls.active { display: flex; }
         .form-group { margin: 20px 0; text-align: left; flex: 1; min-width: 200px; }
-        .form-group label { display: block; margin-bottom: 8px; font-weight: bold; color: #667eea; font-size: 14px; }
-        .form-group select { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 5px; font-size: 14px; cursor: pointer; background: white; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: bold; color: #667eea; }
+        .form-group select { width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; }
         .form-group select:focus { outline: none; border-color: #667eea; box-shadow: 0 0 5px rgba(102, 126, 234, 0.3); }
-        .tier-info { background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 10px 0; border-left: 4px solid #28a745; display: none; }
+        .tier-info { background: #f0f7ff; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #667eea; display: none; }
         .tier-info.active { display: block; }
-        .btn { padding: 15px 40px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; transition: all 0.3s; }
-        .btn-primary { background: white; color: #667eea; border: 2px solid #667eea; }
-        .btn-primary:hover { background: #667eea; color: white; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3); }
+        .btn { padding: 15px 40px; font-size: 16px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+        .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3); }
         .btn:disabled { opacity: 0.6; cursor: not-allowed; }
-        .download-section { display: none; margin-top: 40px; padding: 20px; background: #f9f9f9; border-radius: 8px; }
+        .download-section { display: none; margin-top: 40px; padding: 20px; background: #f9f9f9; border-radius: 12px; }
         .download-section.active { display: block; }
-        .progress-container { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .progress-container { background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
         .progress-label { font-weight: bold; color: #667eea; margin-bottom: 10px; }
         .progress-bar { width: 100%; height: 30px; background: #e0e0e0; border-radius: 15px; overflow: hidden; }
-        .progress-fill { height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; transition: width 0.3s; font-size: 12px; }
-        .video-status { background: #e7f3ff; color: #0066cc; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #0066cc; display: none; }
-        .video-status.active { display: block; }
-        .video-status.processing { background: #fff3cd; color: #856404; border-left-color: #ffc107; }
-        .video-status.completed { background: #d4edda; color: #155724; border-left-color: #28a745; }
-        .download-buttons { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 20px; }
-        .download-btn { padding: 15px 30px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; color: white; transition: all 0.3s; font-size: 14px; }
-        .audio-download { background: #667eea; }
-        .audio-download:hover:not(:disabled) { background: #5568d3; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3); }
-        .video-download { background: #28a745; }
-        .video-download:hover:not(:disabled) { background: #218838; transform: translateY(-2px); }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; transition: width 0.3s; }
+        .download-btn { padding: 15px 30px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: white; background: linear-gradient(135deg, #28a745 0%, #20c997 100%); }
         .download-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .pricing-section { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; margin: 60px 0; }
-        .pricing-section h2 { color: #667eea; margin-bottom: 30px; font-size: 32px; }
-        .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 30px; margin-top: 30px; }
-        .price-box { padding: 30px; border: 3px solid #667eea; border-radius: 8px; transition: all 0.3s; }
-        .price-box:hover { transform: translateY(-5px); box-shadow: 0 8px 20px rgba(0,0,0,0.15); }
-        .price-box.recommended { border-color: #28a745; background: #f0fff4; box-shadow: 0 5px 15px rgba(40, 167, 69, 0.2); }
-        .price-box h3 { color: #667eea; margin: 15px 0; font-size: 20px; }
-        .price-amount { font-size: 36px; font-weight: bold; color: #667eea; margin: 15px 0; }
-        .price-box ul { text-align: left; list-style: none; margin: 20px 0; font-size: 14px; }
-        .price-box li { margin: 8px 0; color: #666; }
-        .faq-section { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin: 60px 0; }
-        .faq-section h2 { color: #667eea; margin-bottom: 30px; font-size: 32px; }
-        .faq-item { margin: 20px 0; border-bottom: 1px solid #eee; padding-bottom: 20px; }
-        .faq-item:last-child { border-bottom: none; }
-        .faq-question { font-weight: bold; color: #667eea; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
-        .faq-question:hover { color: #764ba2; }
-        .faq-answer { display: none; margin-top: 15px; color: #666; line-height: 1.8; }
-        .faq-answer.active { display: block; }
-        footer { background: #333; color: white; text-align: center; padding: 30px; margin-top: 60px; }
-        @media (max-width: 768px) { .hero h1 { font-size: 32px; } .controls { flex-direction: column; } .form-group { min-width: 100%; } .btn { width: 100%; } }
+        .faq { margin-top: 60px; }
+        .faq h2 { color: white; margin-bottom: 30px; }
+        .faq-item { background: white; margin-bottom: 15px; border-radius: 8px; }
+        .faq-question { padding: 20px; cursor: pointer; font-weight: bold; color: #667eea; display: flex; justify-content: space-between; background: #f9f9f9; }
+        .faq-answer { padding: 0 20px; max-height: 0; overflow: hidden; transition: all 0.3s; }
+        .faq-answer.active { padding: 20px; max-height: 500px; }
+        footer { text-align: center; padding: 40px 20px; color: white; }
     </style>
 </head>
 <body>
     <nav>
         <div class="logo">🎙️ NarrativeAI</div>
-        <div><a href="#pricing">Pricing</a> <a href="#faq">FAQ</a></div>
+        <div><a href="#features">Features</a><a href="#faq">FAQ</a></div>
     </nav>
-    
     <div class="hero">
-        <h1>Transform PDFs into Audiobooks & Videos</h1>
-        <p>Professional AI narration with optional talking head video</p>
+        <h1>Turn Your PDF into an Audiobook</h1>
+        <p>Convert documents to high-quality MP3 audio instantly</p>
     </div>
-    
     <div class="container">
-        <div id="status-box" class="status-box">✅ Checking free tier...</div>
-        
         <div class="app-section">
-            <h2>📄 Convert Your PDF</h2>
-            <div class="upload-box" id="upload-box" onclick="document.getElementById('pdf-file').click()" style="font-size: 50px; cursor: pointer;">
-                📁
-                <p style="font-size: 18px; font-weight: bold; color: #667eea; margin-top: 10px;">Click to select PDF or drag & drop</p>
-                <p style="font-size: 14px; color: #999; margin-top: 5px;">Maximum file size: 150MB</p>
+            <div id="status-box" class="status-box">Loading...</div>
+            <h2 style="color: #667eea; margin-bottom: 20px;">📄 Upload Your PDF</h2>
+            <div class="upload-box" id="upload-box" onclick="document.getElementById("pdf-file").click();">
+                <div style="font-size: 48px; margin-bottom: 10px;">📤</div>
+                <p><strong>Click to upload or drag & drop</strong></p>
+                <p style="font-size: 12px; color: #666;">PDF files up to 150MB</p>
             </div>
-            <input type="file" id="pdf-file" style="display: none;" accept=".pdf" onchange="handleFileSelect(event)">
-            
-            <div id="controls" class="controls">
+            <input type="file" id="pdf-file" accept=".pdf" style="display: none;" onchange="handleFileSelect(event)">
+            <div class="controls" id="controls">
                 <div class="form-group">
-                    <label for="tier-select">📦 Choose Your Package:</label>
-                    <select id="tier-select" onchange="updateTierInfo()">
-                        <option value="audio_only">🎙️ Audio Only - £1</option>
-                        <option value="video_addon">🎥 Audio + Video - £5</option>
-                        <option value="premium_bundle">⭐ Premium Bundle - £8/mo</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="voice-select">🎤 Narrator Voice:</label>
+                    <label for="voice-select">🎙️ Select Voice:</label>
                     <select id="voice-select">
-                        <option value="Joanna">Joanna (Female - Professional)</option>
-                        <option value="Matthew">Matthew (Male - Clear)</option>
-                        <option value="Justin">Justin (Male - Friendly)</option>
-                        <option value="Ivy">Ivy (Female - Energetic)</option>
+                        <option value="Joanna">Joanna (Female, US)</option>
+                        <option value="Matthew">Matthew (Male, US)</option>
+                        <option value="Justin">Justin (Male, US)</option>
+                        <option value="Ivy">Ivy (Female, US)</option>
+                        <option value="Kendra">Kendra (Female, US)</option>
                     </select>
                 </div>
-                <div style="background-color: #f0f4ff; border-left: 4px solid #667eea; padding: 12px; margin: 15px 0; border-radius: 4px; font-size: 13px; color: #333;">
-                    💡 <strong>Tip:</strong> Maximum file size is 150MB. Larger PDFs may take longer to process.
+                <div class="form-group">
+                    <label for="voice-rate">⚡ Speed:</label>
+                    <select id="voice-rate">
+                        <option value="80">Slow (80%)</option>
+                        <option value="90" selected>Normal (90%)</option>
+                        <option value="100">Fast (100%)</option>
+                    </select>
                 </div>
-                <button class="btn btn-primary" onclick="handleConvert()" id="convert-btn">🚀 Convert Now</button>
+                <button class="btn btn-primary" id="convert-btn" onclick="handleConvert()" disabled>🚀 Convert</button>
             </div>
-            
-            <div id="tier-info" class="tier-info">
-                <h4>📦 Selected Package</h4>
-                <p id="tier-details"></p>
-            </div>
-        </div>
-        
-        <div id="download-section" class="download-section">
-            <div class="progress-container">
-                <div class="progress-label">🔄 Processing: <span id="job-progress">0</span>%</div>
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progress-fill" style="width: 0%">0%</div>
+            <div class="tier-info" id="tier-info">✅ Audio Only | 💰 £1 per conversion</div>
+            <div class="download-section" id="download-section">
+                <div class="progress-container">
+                    <div class="progress-label">📊 Progress: <span id="job-progress">0</span>%</div>
+                    <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width: 0%;"></div></div>
                 </div>
-            </div>
-            
-            <div id="video-status" class="video-status">
-                <strong>🎬 Video Generation Status</strong>
-                <div id="video-status-text">Checking video progress...</div>
-            </div>
-            
-            <div class="download-buttons">
-                <button id="audio-download-btn" class="download-btn audio-download" onclick="downloadAudio()" disabled>🎵 Download Audio (MP3)</button>
-                <button id="video-download-btn" class="download-btn video-download" onclick="downloadVideo()" disabled style="display: none;">🎬 Download Video (MP4)</button>
-            </div>
-        </div>
-        
-        <div id="pricing" class="pricing-section">
-            <h2>💰 Pricing</h2>
-            <div class="pricing-grid">
-                <div class="price-box">
-                    <h3>🎙️ Audio Only</h3>
-                    <div class="price-amount">£1</div>
-                    <p>per conversion</p>
-                    <ul>
-                        <li>✅ Professional AI narration</li>
-                        <li>✅ Multiple voices</li>
-                        <li>✅ High-quality MP3</li>
-                    </ul>
-                </div>
-                <div class="price-box recommended">
-                    <div style="text-align: center; background: #28a745; color: white; padding: 10px; border-radius: 5px; margin-bottom: 15px; font-weight: bold;">⭐ POPULAR</div>
-                    <h3>🎥 Audio + Video</h3>
-                    <div class="price-amount">£5</div>
-                    <p>per conversion</p>
-                    <ul>
-                        <li>✅ Professional narration</li>
-                        <li>✅ AI talking head video</li>
-                        <li>✅ MP3 + MP4 files</li>
-                    </ul>
-                </div>
-                <div class="price-box">
-                    <h3>⭐ Premium Bundle</h3>
-                    <div class="price-amount">£8</div>
-                    <p>per month - Unlimited</p>
-                    <ul>
-                        <li>✅ Unlimited conversions</li>
-                        <li>✅ All features included</li>
-                        <li>✅ Priority support</li>
-                    </ul>
+                <div class="download-buttons">
+                    <button id="audio-download-btn" class="download-btn" onclick="downloadAudio()" disabled>🎵 Download Audio (MP3)</button>
                 </div>
             </div>
         </div>
-        
-        <div id="faq" class="faq-section">
-            <h2>❓ Frequently Asked Questions</h2>
+        <div id="features" class="faq" style="margin-top: 80px;">
+            <h2>✨ Features</h2>
+            <div style="background: white; padding: 30px; border-radius: 12px;">
+                <ul style="list-style: none;">
+                    <li style="padding: 10px 0;">✅ Natural-sounding voices</li>
+                    <li style="padding: 10px 0;">✅ Multiple voice options</li>
+                    <li style="padding: 10px 0;">✅ Adjustable speech speed</li>
+                    <li style="padding: 10px 0;">✅ High-quality MP3 output</li>
+                    <li style="padding: 10px 0;">✅ Fast processing</li>
+                    <li style="padding: 10px 0;">✅ Supports large PDFs (up to 150MB)</li>
+                </ul>
+            </div>
+        </div>
+        <div id="faq" class="faq">
+            <h2>❓ FAQ</h2>
             <div class="faq-item">
-                <div class="faq-question" onclick="toggleFAQ(this)">What file formats do you support? <span>+</span></div>
-                <div class="faq-answer">We support PDF files. Upload your PDF and select your voice and package type.</div>
+                <div class="faq-question" onclick="toggleFAQ(this)">How much does it cost? <span>+</span></div>
+                <div class="faq-answer">5 free conversions per day, then £1 each!</div>
             </div>
             <div class="faq-item">
-                <div class="faq-question" onclick="toggleFAQ(this)">How long does conversion take? <span>+</span></div>
-                <div class="faq-answer">Audio typically takes 1-5 minutes. Video generation adds 5-15 minutes for AI avatar creation.</div>
+                <div class="faq-question" onclick="toggleFAQ(this)">How long does it take? <span>+</span></div>
+                <div class="faq-answer">Most PDFs convert in 1-3 minutes.</div>
             </div>
             <div class="faq-item">
-                <div class="faq-question" onclick="toggleFAQ(this)">What voices are available? <span>+</span></div>
-                <div class="faq-answer">Four professional voices: Joanna, Matthew, Justin, and Ivy with different tones.</div>
-            </div>
-            <div class="faq-item">
-                <div class="faq-question" onclick="toggleFAQ(this)">Can I download the video? <span>+</span></div>
-                <div class="faq-answer">Yes! With Audio + Video or Premium, download both MP3 and MP4 files.</div>
-            </div>
-            <div class="faq-item">
-                <div class="faq-question" onclick="toggleFAQ(this)">Is there a free trial? <span>+</span></div>
-                <div class="faq-answer">Yes! New users get free conversions daily. Check status to see remaining.</div>
+                <div class="faq-question" onclick="toggleFAQ(this)">File size limits? <span>+</span></div>
+                <div class="faq-answer">PDF files up to 150MB supported.</div>
             </div>
         </div>
     </div>
-    
-    <footer>
-        <p>&copy; 2026 NarrativeAI. Transform your reading into listening.</p>
-    </footer>
-    
+    <footer><p>© 2026 NarrativeAI. PDF to Audiobook Converter.</p></footer>
     <script>
-        let currentJobId = null, currentTier = "audio_only", videoPollingInterval = null;
-        async function checkFreeTier() { try { const r = await fetch("/api/free-tier"); const d = await r.json(); document.getElementById("status-box").innerHTML = "✅ " + d.remaining + " free conversions"; } catch (e) { } }
-        function handleFileSelect(e) { const f = e.target.files[0]; if (!f || !f.name.endsWith(".pdf")) { alert("Select PDF"); return; } document.getElementById("upload-box").classList.add("active"); document.getElementById("upload-box").innerHTML = "✅<p style='color: #28a745; margin-top: 10px;'><strong>" + f.name + "</strong></p>"; document.getElementById("controls").classList.add("active"); }
-        function updateTierInfo() { const t = document.getElementById("tier-select").value; currentTier = t; const i = { audio_only: "🎙️ Audio Only", video_addon: "🎥 Audio + Video", premium_bundle: "⭐ Premium" }; document.getElementById("tier-details").textContent = i[t]; document.getElementById("tier-info").classList.add("active"); if (t !== "audio_only") { document.getElementById("video-download-btn").style.display = "block"; document.getElementById("video-status").classList.add("active"); } else { document.getElementById("video-download-btn").style.display = "none"; } }
-        async function handleConvert() { 
-            const f = document.getElementById("pdf-file").files[0]; 
-            if (!f) { alert("Select PDF"); return; } 
-            
-            currentTier = document.getElementById("tier-select").value; 
-            console.log("=== UPLOAD START ===");
-            console.log("Submitting tier:", currentTier); 
-            console.log("Selected file:", f.name, f.size, "bytes");
-            
-            const d = new FormData(); 
-            d.append("file", f); 
-            d.append("tier", currentTier); 
-            d.append("voice", document.getElementById("voice-select").value); 
-            
-            console.log("FormData contents:");
-            for (let pair of d.entries()) {
-                console.log("  -", pair[0], ":", pair[1]);
-            }
-            
-            const b = document.getElementById("convert-btn"); 
-            b.disabled = true; 
-            b.textContent = "⏳ Uploading..."; 
-            
-            try { 
-                console.log("📤 Sending POST request to /upload...");
-                const r = await fetch("/upload", { method: "POST", body: d }); 
-                
-                console.log("📡 Response received:");
-                console.log("   - Status:", r.status);
-                console.log("   - OK:", r.ok);
-                console.log("   - Content-Type:", r.headers.get("content-type"));
-                
-                // First, read the response as text to see what we're actually getting
-                const responseText = await r.text();
-                console.log("   - Response text (first 500 chars):", responseText.substring(0, 500));
-                
-                // Try to parse as JSON
-                let a;
-                try {
-                    a = JSON.parse(responseText);
-                    console.log("   ✅ Valid JSON response:", JSON.stringify(a, null, 2));
-                } catch (jsonError) {
-                    console.error("   ❌ Invalid JSON response!", jsonError);
-                    console.log("   Full response:", responseText);
-                    throw new Error(`Server returned invalid JSON. Status: ${r.status}. Response: ${responseText.substring(0, 200)}`);
-                }
-                
-                if (r.ok) { 
-                    currentJobId = a.job_id;
-                    console.log("✅ Job ID set to:", currentJobId);
-                    document.getElementById("download-section").classList.add("active"); 
-                    
-                    // Make sure video status is visible if video is enabled
-                    console.log("🎬 Checking if video should be enabled...");
-                    console.log("   - a.include_video value:", a.include_video);
-                    console.log("   - typeof a.include_video:", typeof a.include_video);
-                    
-                    if (a.include_video) {
-                        console.log("✅ Video ENABLED - showing video status section");
-                        const videoStatusDiv = document.getElementById("video-status");
-                        const videoDownloadBtn = document.getElementById("video-download-btn");
-                        videoStatusDiv.classList.add("active");
-                        videoDownloadBtn.style.display = "block";
-                    } else {
-                        console.log("❌ Video DISABLED - include_video is false");
-                    }
-                    
-                    pollJobStatus(currentJobId); 
-                    
-                    if (a.include_video) {
-                        console.log("🎬 Starting video polling");
-                        startVideoPolling(currentJobId); 
-                    } else {
-                        console.log("❌ Skipping video polling - video not enabled");
-                    }
-                } else { 
-                    console.error("❌ Error response:", r.status, r.statusText);
-                    alert("Upload failed: " + r.statusText); 
-                    b.disabled = false; 
-                    b.textContent = "🚀 Convert"; 
-                } 
-            } catch (e) { 
-                console.error("❌ Exception in handleConvert:", e);
-                alert("Error: " + e.message); 
-                b.disabled = false; 
-                b.textContent = "🚀 Convert"; 
-            } 
+        let currentJobId = null;
+        async function checkFreeTier() {
+            try {
+                const r = await fetch("/api/free-tier");
+                const d = await r.json();
+                document.getElementById("status-box").innerHTML = `✅ ${d.remaining} free conversions today`;
+                if (d.remaining > 0) document.getElementById("convert-btn").disabled = false;
+            } catch (e) { console.error(e); }
         }
-        async function pollJobStatus(j) { const i = setInterval(async () => { try { const r = await fetch("/jobs/" + j); const d = await r.json(); document.getElementById("job-progress").textContent = d.progress; document.getElementById("progress-fill").style.width = d.progress + "%"; if (d.status === "completed") { clearInterval(i); document.getElementById("audio-download-btn").disabled = false; } } catch (e) { } }, 1000); }
-        async function startVideoPolling(j) { if (videoPollingInterval) clearInterval(videoPollingInterval); videoPollingInterval = setInterval(async () => { try { const r = await fetch("/video-status/" + j); if (!r.ok) return; const d = await r.json(); const v = document.getElementById("video-status"); if (d.status === "completed") { clearInterval(videoPollingInterval); v.classList.add("completed"); document.getElementById("video-status-text").innerHTML = "✅ Ready!"; document.getElementById("video-download-btn").disabled = false; } else if (d.status === "processing") { v.classList.add("processing"); document.getElementById("video-status-text").innerHTML = "🔄 Generating..."; } } catch (e) { } }, 2000); }
-        async function downloadAudio() { if (!currentJobId) return; try { const r = await fetch("/download/" + currentJobId + "?type=audio"); const b = await r.blob(); const u = URL.createObjectURL(b); const a = document.createElement("a"); a.href = u; a.download = "audiobook.mp3"; a.click(); URL.revokeObjectURL(u); } catch (e) { alert("Error"); } }
-        async function downloadVideo() { if (!currentJobId) return; try { const r = await fetch("/download/" + currentJobId + "?type=video"); const d = await r.json(); if (d.video_url) { const a = document.createElement("a"); a.href = d.video_url; a.download = "audiobook.mp4"; a.click(); } else { alert("Not ready"); } } catch (e) { alert("Error"); } }
-        function toggleFAQ(e) { const a = e.nextElementSibling; a.classList.toggle("active"); e.querySelector("span").textContent = a.classList.contains("active") ? "−" : "+"; }
-        updateTierInfo();
+        function handleFileSelect(e) {
+            const f = e.target.files[0];
+            if (!f || !f.name.endsWith(".pdf")) { alert("Select PDF"); return; }
+            document.getElementById("upload-box").classList.add("active");
+            document.getElementById("upload-box").innerHTML = `✅<p style="color: #28a745; margin-top: 10px;"><strong>${f.name}</strong></p>`;
+            document.getElementById("controls").classList.add("active");
+            document.getElementById("tier-info").classList.add("active");
+        }
+        async function handleConvert() {
+            const f = document.getElementById("pdf-file").files[0];
+            if (!f) { alert("Select PDF"); return; }
+            const voice = document.getElementById("voice-select").value;
+            const rate = document.getElementById("voice-rate").value;
+            const b = document.getElementById("convert-btn");
+            b.disabled = true;
+            b.textContent = "⏳ Converting...";
+            try {
+                const fd = new FormData();
+                fd.append("pdf_file", f);
+                fd.append("voice", voice);
+                fd.append("rate", rate);
+                fd.append("tier", "audio_only");
+                const r = await fetch("/upload", { method: "POST", body: fd });
+                if (r.ok) {
+                    const a = await r.json();
+                    currentJobId = a.job_id;
+                    document.getElementById("download-section").classList.add("active");
+                    pollJobStatus(currentJobId);
+                } else { alert("Failed"); b.disabled = false; b.textContent = "🚀 Convert"; }
+            } catch (e) { alert("Error: " + e.message); b.disabled = false; b.textContent = "🚀 Convert"; }
+        }
+        async function pollJobStatus(j) {
+            const i = setInterval(async () => {
+                try {
+                    const r = await fetch("/jobs/" + j);
+                    const d = await r.json();
+                    document.getElementById("job-progress").textContent = d.progress;
+                    document.getElementById("progress-fill").style.width = d.progress + "%";
+                    if (d.status === "completed") { clearInterval(i); document.getElementById("audio-download-btn").disabled = false; }
+                } catch (e) { }
+            }, 1000);
+        }
+        async function downloadAudio() {
+            if (!currentJobId) return;
+            try {
+                const r = await fetch("/download/" + currentJobId + "?type=audio");
+                const b = await r.blob();
+                const u = URL.createObjectURL(b);
+                const a = document.createElement("a");
+                a.href = u;
+                a.download = "audiobook.mp3";
+                a.click();
+                URL.revokeObjectURL(u);
+            } catch (e) { alert("Error"); }
+        }
+        function toggleFAQ(e) {
+            const a = e.nextElementSibling;
+            a.classList.toggle("active");
+            e.querySelector("span").textContent = a.classList.contains("active") ? "−" : "+";
+        }
         window.addEventListener("load", checkFreeTier);
     </script>
 </body>
